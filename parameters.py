@@ -24,6 +24,13 @@ RISK_SENSITIVITY = 1.0 # factor de escala implícito para tanh(mu * leverage)
 N_CONSUMPTION_APPS = 2 # z
 N_CREDIT_APPS = 5      # n
 
+# Parámetros Mercado Interbancario y Tax
+LIQUIDITY_BUFFER_RATIO = 0.10 # % de Activos (Loans) que se desea en Cash
+SRT_SENSITIVITY = 0.5   # zeta ajustado. 1.0 puede ser alto para redes pequeñas. Probamos 0.5.
+INTERBANK_LGD = 1.0     # Loss Given Default en interbancario (Asumimos pérdida total si quiebra)
+INTERBANK_RATE = 0.005  # Tasa interbancaria base (muy baja, overnight)
+
+
 # Configuración Inicial
 INITIAL_FIRM_CASH = 1000.0
 INITIAL_BANK_EQUITY = 2000.0

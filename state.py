@@ -60,6 +60,18 @@ class EconomyState:
         # Banco prestamista escogido para el nuevo préstamo (-1 = ninguno)
         self.firm_lender_choice = np.full(N_FIRMS, -1, dtype=np.int32)
         
+        # --- Variables de Flujo Paso 5 (Repago) ---
+        # Deuda incobrable (bad debt) reconocida por los bancos en este paso
+        self.bank_bad_debt = np.zeros(N_BANKS, dtype=np.float64)
+        # Contador de defaults acumulados por firma (opcional para stats)
+        self.firm_cumulative_default = np.zeros(N_FIRMS, dtype=np.int32)
+        
+        # --- Variables de Flujo Paso 6 (Interbancario) ---
+        # Nivel de Riesgo Sistémico (DebtRank promedio o total) del paso actual
+        self.total_systemic_risk = 0.0
+        # Impuesto sistémico recaudado en este paso
+        self.collected_tax = 0.0
+        
         # --- Asignación de Propiedad (Ownership) ---
         # Los hogares son dueños de firmas y bancos. 
         # Asignación aleatoria inicial.
