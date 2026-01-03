@@ -69,6 +69,8 @@ class EstadoEconomia:
         self.riesgo_sistemico_total = 0.0
         # Impuesto sistémico recaudado en este paso
         self.impuesto_recaudado = 0.0
+        # Fondo de Rescate (Bailout Fund) - Acumula impuestos para consistencia stock-flow
+        self.fondo_rescate = 0.0
         
         # --- Asignación de Propiedad (Ownership) ---
         # Los hogares son dueños de empresas y bancos. 

@@ -257,14 +257,21 @@ def paso5_repago_empresas(estado):
         
         estado.deuda_incobrable_bancos -= np.minimum(0, total_cambio_patrimonio)
         
-        # --- REEMPLAZO DE EMPRESAS ---
+        # --- REEMPLAZO DE EMPRESAS Y RESPONSABILIDAD PERSONAL ---
         estado.prestamos_banco_empresa[:, mascara_default] = 0.0
         estado.tasas_interes_prestamos[:, mascara_default] = 0.0
         
+        # 1. Identificar dueños y cobrarles
+        duenos_afectados = estado.duenos_empresas[mascara_default]
+        # El dinero sale de los hogares
+        estado.efectivo_hogares[duenos_afectados] -= EFECTIVO_INICIAL_EMPRESA
+        
+        # 2. Reiniciar empresa con ese dinero (Transferencia, no creación)
         estado.efectivo_empresas[mascara_default] = EFECTIVO_INICIAL_EMPRESA
         estado.stock_empresas[mascara_default] = 0.0
         estado.defaults_acumulados_empresas[mascara_default] += 1
         
+        # 3. Asignar nuevos dueños (opcional, pero seguimos lógica de "start a new company")
         estado.duenos_empresas[mascara_default] = np.random.randint(0, N_HOGARES, size=np.sum(mascara_default))
         
     return estado
@@ -414,6 +421,8 @@ def paso6_mercado_interbancario(estado, modo_impuesto='IRS'):
             if estado.efectivo_bancos[idx_prestatario] >= impuesto:
                 estado.efectivo_bancos[idx_prestatario] -= impuesto
                 impuestos_recaudados += impuesto
+                # Acumular en Fondo de Rescate (Stock-Flow Consistency)
+                estado.fondo_rescate += impuesto
             else:
                 estado.matriz_interbancaria[idx_prestamista, idx_prestatario] -= monto
                 estado.efectivo_bancos[idx_prestamista] += monto
