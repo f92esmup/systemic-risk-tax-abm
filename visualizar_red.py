@@ -86,5 +86,5 @@ if __name__ == "__main__":
     # Ajusta el nombre del archivo según tu ejecución
     # Buscamos el archivo más reciente o uno específico
     archivo = "relaciones_IRS_Impuesto_Riesgo_Sistémico.csv" 
-    paso = 450 # Un paso avanzado donde la red ya evolucionó
+    paso = 30 # Un paso avanzado donde la red ya evolucionó
     dibujar_grafo_paso(archivo, paso)

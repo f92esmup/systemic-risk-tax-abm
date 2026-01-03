@@ -22,27 +22,21 @@ class RecolectorDatos:
     def capturar_paso(self, estado, step):
         nuevas_filas = []
 
-        # 1. Crédito: Banco -> Empresa (Weight=Monto Deuda)
-        banco_idxs, empresa_idxs = np.where(estado.prestamos_banco_empresa > 1e-2)
-        montos = estado.prestamos_banco_empresa[banco_idxs, empresa_idxs]
-        for b, e, m in zip(banco_idxs, empresa_idxs, montos):
-            nuevas_filas.append(f"{step},Banco,{b},Empresa,{e},{m:.2f},CREDITO")
-
-        # 2. Interbancario: Banco -> Banco (Weight=Monto Deuda)
+        # 1. Interbancario: Banco -> Banco (Weight=Monto Deuda) - PRIORIDAD 1 (Fig 2)
         b_src, b_tgt = np.where(estado.matriz_interbancaria > 1e-2)
         montos_ib = estado.matriz_interbancaria[b_src, b_tgt]
         for s, t, m in zip(b_src, b_tgt, montos_ib):
             nuevas_filas.append(f"{step},Banco,{s},Banco,{t},{m:.2f},INTERBANCARIO")
 
-        # 3. Propiedad: Hogar -> Empresa
-        for e_idx, h_idx in enumerate(estado.duenos_empresas):
-            nuevas_filas.append(f"{step},Hogar,{h_idx},Empresa,{e_idx},1.0,PROPIEDAD")
-
-        # 4. Propiedad: Hogar -> Banco
-        for b_idx, h_idx in enumerate(estado.duenos_bancos):
-            nuevas_filas.append(f"{step},Hogar,{h_idx},Banco,{b_idx},1.0,PROPIEDAD")
+        # 2. Crédito: Banco -> Empresa (Weight=Monto Deuda) - PRIORIDAD 2 (Opcional si solo queremos Fig 2)
+        # La mantenemos pero comentada si se requiere optimización extrema, el usuario dijo "fidelidad al paper",
+        # la Fig 2 es RED INTERBANCARIA. Dejaremos Créditos para verificación macro pero no red.
+        # banco_idxs, empresa_idxs = np.where(estado.prestamos_banco_empresa > 1e-2)
+        # montos = estado.prestamos_banco_empresa[banco_idxs, empresa_idxs]
+        # for b, e, m in zip(banco_idxs, empresa_idxs, montos):
+        #     nuevas_filas.append(f"{step},Banco,{b},Empresa,{e},{m:.2f},CREDITO")
             
-        # Write to file periodically or every step (handling buffer if needed, but direct append is safer for crash recovery)
+        # Write to file periodically or every step
         if nuevas_filas:
             with open(self.nombre_archivo, "a") as f:
                 f.write("\n".join(nuevas_filas) + "\n")
@@ -51,7 +45,6 @@ class EjecutorSimulacion:
     def __init__(self, pasos=PASOS_SIMULACION):
         self.pasos = pasos
         self.resultados = {}
-        # Recolector global (o por escenario, aquí lo haremos por escenario pero sobreescribiendo para simplificar la demo)
 
     def ejecutar_escenario(self, nombre_escenario, modo_impuesto):
         print(f"\n>>> Iniciando Escenario: {nombre_escenario} (Modo Impuesto: {modo_impuesto})")
@@ -72,7 +65,8 @@ class EjecutorSimulacion:
             'riesgo_sistemico': [],
             'impuesto_recaudado': [],
             'patrimonio_bancos_total': [],
-            'fondo_rescate': []
+            'fondo_rescate': [],
+            'tamano_cascada': [] # Nuevo: Fig 4b
         }
         
         for t in range(self.pasos):
@@ -91,22 +85,30 @@ class EjecutorSimulacion:
             # --- Paso 5: Repago y Quiebras Empresas ---
             estado = paso5_repago_empresas(estado)
             
-            # --- Paso 5b: Contagio Interbancario (Shock Externo) ---
-            estado = ejecutar_contagio_interbancario(estado)
+            # --- Paso 5b: Contagio Interbancario (Shock Externo Previo a Mercado) ---
+            estado, cascada_1 = ejecutar_contagio_interbancario(estado)
             
             # --- Paso 6: Interbancario y Tax ---
-            estado = paso6_mercado_interbancario(estado, modo_impuesto=modo_impuesto)
+            # Ahora paso6 devuelve (estado, cascada_interna)
+            estado, cascada_2 = paso6_mercado_interbancario(estado, modo_impuesto=modo_impuesto)
+            
+            # --- catch-up final if needed (paso6 already did it, but let's be safe or skip)
+            # Como paso6 ya ejecutó contagio, no deberíamos necesitar llamarlo de nuevo inmediatamente
+            # salvo que queramos ver si el tax causó algo extra (pero paso6 lo incluye).
+            # Eliminamos la llamada redundante para evitar doble conteo o confusión.
+            
+            cascada_total_paso = cascada_1 + cascada_2
             
             # --- Paso 7: Evolución ---
             estado = paso7_evolucion(estado)
             
             # --- Recolección de Datos ---
-            recolector.capturar_paso(estado, t)
+            if t % 5 == 0: # Optimización: Guardar red cada 5 pasos
+                recolector.capturar_paso(estado, t)
             
             historial['paso'].append(t)
             historial['produccion_total'].append(np.sum(estado.stock_empresas))
             
-            # Usamos ventas_diarias si existe (lo añadimos en logica.py y estado.py)
             ventas = np.sum(estado.ventas_diarias_empresas) if hasattr(estado, 'ventas_diarias_empresas') else 0.0
             historial['consumo_total'].append(ventas)
             
@@ -116,13 +118,28 @@ class EjecutorSimulacion:
             historial['impuesto_recaudado'].append(estado.impuesto_recaudado)
             historial['patrimonio_bancos_total'].append(np.sum(estado.patrimonio_bancos))
             historial['fondo_rescate'].append(estado.fondo_rescate)
+            historial['tamano_cascada'].append(cascada_total_paso)
             
-            if t % 10 == 0:
-                print(f"   Paso {t}/{self.pasos} - SR: {estado.riesgo_sistemico_total:.2f} - Impuesto: {estado.impuesto_recaudado:.2f}")
+            if t % 50 == 0:
+                print(f"   Paso {t}/{self.pasos} - SR: {estado.riesgo_sistemico_total:.2f} - Cascada: {cascada_total_paso}")
 
         tiempo_transcurrido = time.time() - tiempo_inicio
         print(f"<<< Escenario {nombre_escenario} completado en {tiempo_transcurrido:.2f}s")
         
+        # Guardar Snapshot Final de Riesgos Individuales (Fig 3b)
+        # Calculamos DebtRank individual final
+        # Necesitamos la funcion calcular_debtrank pero devuelve scalar.
+        # Vamos a guardar el Out-Degree Ponderado como proxy o implementar DR Vectorial.
+        # Por simplicidad y robustez: Guardamos Exposiciones Totales (Out-Strength) y Patrimonio.
+        from logica import calcular_debtrank
+        # Nota: calcular_debtrank en logica devuelve total, pero dentro calcula 'perdidas' vector. 
+        # No podemos acceder facilmente, usamos proxy de NetworkX en visualizacion o guardamos raw data.
+        # Mejor: Guardamos estado.matriz_interbancaria y estado.patrimonio_bancos en numpy.
+        
+        np.savez(f"snapshot_final_{nombre_safe}.npz", 
+                 matriz_interbancaria=estado.matriz_interbancaria, 
+                 patrimonio_bancos=estado.patrimonio_bancos)
+
         df = pd.DataFrame(historial)
         self.resultados[nombre_escenario] = df
         return df

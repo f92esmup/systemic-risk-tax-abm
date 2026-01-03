@@ -307,22 +307,24 @@ def calcular_debtrank(matriz_interbancaria, patrimonio_bancos):
         
     return total_rs
 
+    return estado, len(nuevos_defaults_totales)
+
 def ejecutar_contagio_interbancario(estado):
     """
     Motor de Contagio Recursivo.
+    Devuelve: (estado, numero_bancos_caidos)
     """
     bancos_defaultados = estado.patrimonio_bancos < 0
     
     nuevos_defaults = list(np.where(bancos_defaultados)[0])
-    defaults_procesados = set()
+    defaults_procesados = set(nuevos_defaults) # Optimización: set inicial
+    nuevos_defaults_totales = set(nuevos_defaults) # Para contar total afectados en esta cascada
     
-    while len(nuevos_defaults) > 0:
-        defaulter_actual = nuevos_defaults.pop(0)
-        
-        if defaulter_actual in defaults_procesados:
-            continue
-            
-        defaults_procesados.add(defaulter_actual)
+    # Cola de procesamiento
+    cola_procesamiento = list(nuevos_defaults)
+
+    while len(cola_procesamiento) > 0:
+        defaulter_actual = cola_procesamiento.pop(0)
         
         indices_prestamistas = np.where(estado.matriz_interbancaria[:, defaulter_actual] > 0)[0]
         
@@ -333,10 +335,12 @@ def ejecutar_contagio_interbancario(estado):
             estado.patrimonio_bancos[prestamista] -= perdida
             estado.matriz_interbancaria[prestamista, defaulter_actual] = 0.0
             
-            if estado.patrimonio_bancos[prestamista] < 0 and prestamista not in defaults_procesados and prestamista not in nuevos_defaults:
-                nuevos_defaults.append(prestamista)
+            if estado.patrimonio_bancos[prestamista] < 0 and prestamista not in defaults_procesados:
+                defaults_procesados.add(prestamista)
+                nuevos_defaults_totales.add(prestamista)
+                cola_procesamiento.append(prestamista)
                 
-    return estado
+    return estado, len(nuevos_defaults_totales)
 
 def paso6_mercado_interbancario(estado, modo_impuesto='IRS'):
     """
@@ -437,9 +441,9 @@ def paso6_mercado_interbancario(estado, modo_impuesto='IRS'):
     estado.impuesto_recaudado = impuestos_recaudados
     estado.riesgo_sistemico_total = rs_actual
     
-    estado = ejecutar_contagio_interbancario(estado)
+    estado, cascada_size = ejecutar_contagio_interbancario(estado)
     
-    return estado
+    return estado, cascada_size
 
 def paso7_evolucion(estado):
     """

@@ -37,18 +37,19 @@ def graficar_comparativa():
         sns.lineplot(data=df, x='paso', y='impuesto_recaudado', hue='Escenario', ax=axes[1,0])
         axes[1,0].set_title("Recaudación Diaria")
 
-    # 4. Distribución de Pérdidas (Defaults Empresas) - Proxy de Fig 4a
-    # Usamos histograma (KDE) para ver la cola de distribución de quiebras
-    # Nota: defaults_empresas es acumulado en el historial, necesitamos el diferencial o usar el acumulado para ver la tendencia total
-    # Para la distribución de IMPACTO (tamaño de cascadas), sería mejor ver los defaults por paso.
-    # Pero si el CSV tiene acumulados, calculamos la diferencia.
+    # 4. Distribución de Tamaño de Cascadas (Avalanchas) - Fig 4b (Paper)
+    # El paper muestra P(S) vs S (log-log o histograma)
+    # Aquí usamos KDE/Histograma de la columna tamano_cascada
     
-    # Agrupamos por escenario para calcular diferencias
-    df['defaults_diarios'] = df.groupby('Escenario')['defaults_empresas'].diff().fillna(0)
+    # Filtrar cascadas > 0 para ver eventos de crisis
+    # df_crisis = df[df['tamano_cascada'] > 0] 
+    # Si filtramos solo > 0, perdemos la noción de frecuencia relativa total, 
+    # pero para ver la cola es mejor. El paper suele plotear la CCDF o PDF.
     
-    sns.kdeplot(data=df, x='defaults_diarios', hue='Escenario', ax=axes[1,1], fill=True, common_norm=False)
-    axes[1,1].set_title("Distribución de Quiebras Diarias (Cola de Riesgo)")
-    axes[1,1].set_xlabel("Número de defaults por paso")
+    sns.histplot(data=df, x='tamano_cascada', hue='Escenario', ax=axes[1,1], kde=True, bins=20, log_scale=(False, True))
+    axes[1,1].set_title("Distribución de Tamaño de Cascadas (Bancos Caídos)")
+    axes[1,1].set_xlabel("Número de Bancos Caídos por Paso")
+    axes[1,1].set_ylabel("Frecuencia (Log Scale)")
 
     plt.tight_layout()
     output_file = "comparativa_resultados.png"
