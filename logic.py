@@ -247,6 +247,81 @@ def step3_production(state):
     
     # Guardamos producción real para métricas si hiciera falta
     # state.firm_planned_production se sobreescribe o mantenemos diff?
-    # Por ahora solo stock importa para venta.
+    state.firm_stock = np.maximum(state.firm_stock, 0.0) # Corrección error flotante
     
     return state
+
+def step4_consumption(state):
+    """
+    Paso 4: Consumo de los Hogares.
+    
+    Lógica Tensorial:
+    1. Hogares definen presupuesto C_h = c * Cash_h.
+    2. Seleccionan Z firmas al azar y eligen la de menor precio (P_i).
+    3. Agregan demanda a esas firmas.
+    4. Firmas verifican stock. Si Demanda > Stock -> Racionamiento.
+    5. Ejecución de compras.
+    """
+    
+    # 1. Presupuesto
+    household_budgets = state.household_cash * PROPENSITY_TO_CONSUME
+    
+    # 2. Selección de Proveedores (Z firmas al azar)
+    # Matriz (H, Z) de índices de firmas
+    # N_CONSUMPTION_APPS = z
+    firm_choices = np.random.randint(0, N_FIRMS, size=(N_HOUSEHOLDS, N_CONSUMPTION_APPS))
+    
+    # Obtener precios de las firmas elegidas -> (H, Z)
+    # state.firm_prices shape (F,)
+    chosen_prices = state.firm_prices[firm_choices]
+    
+    # Encontrar índice del mínimo precio por fila (axis=1)
+    best_idx_local = np.argmin(chosen_prices, axis=1) # (H,) 0..Z-1
+    
+    # Obtener el ID de la firma ganadora para cada hogar
+    # Fancy indexing: range(H) para filas, best_idx_local para columnas
+    winner_firms = firm_choices[np.arange(N_HOUSEHOLDS), best_idx_local] # (H,)
+    winner_prices = chosen_prices[np.arange(N_HOUSEHOLDS), best_idx_local] # (H,)
+    
+    # 3. Calcular Demanda Deseada (Q = Budget / Price)
+    # Evitar div por cero si price=0 (aunque init es 1.0)
+    desired_quantities = np.zeros_like(household_budgets)
+    valid_prices = winner_prices > 1e-9
+    desired_quantities[valid_prices] = household_budgets[valid_prices] / winner_prices[valid_prices]
+    
+    # 4. Agregación de Demanda por Firma
+    # Sumar desired_quantities agrupado por winner_firms
+    total_demand_per_firm = np.bincount(winner_firms, weights=desired_quantities, minlength=N_FIRMS)
+    
+    # 5. Racionamiento (Supply Constraint)
+    available_stock = state.firm_stock
+    # Calcular factor de racionamiento (1.0 si sobra stock, <1.0 si falta)
+    # ration = stock / demand
+    rationing_factor = np.ones(N_FIRMS, dtype=np.float64)
+    shortage_mask = total_demand_per_firm > available_stock
+    
+    # Para evitar div/0 si demand es 0 (mask lo cubre, pero por seguridad numérica)
+    denominator = np.maximum(total_demand_per_firm, 1e-9)
+    rationing_factor[shortage_mask] = available_stock[shortage_mask] / denominator[shortage_mask]
+    
+    # 6. Ejecución (Broadcasting del racionamiento a los hogares)
+    # Cada hogar 'h' compró a 'winner_firms[h]', le aplica 'rationing_factor[winner_firms[h]]'
+    household_rationing = rationing_factor[winner_firms]
+    
+    actual_quantities = desired_quantities * household_rationing
+    actual_spending = actual_quantities * winner_prices
+    
+    # Actualizar saldos
+    state.household_cash -= actual_spending
+    
+    # Ingresos de Firmas: Sumar spending agrupado por winner_firms
+    firm_revenue = np.bincount(winner_firms, weights=actual_spending, minlength=N_FIRMS)
+    state.firm_cash += firm_revenue
+    
+    # Decremento de Stock
+    firm_sales_vol = np.bincount(winner_firms, weights=actual_quantities, minlength=N_FIRMS)
+    state.firm_stock -= firm_sales_vol
+    state.firm_stock = np.maximum(state.firm_stock, 0.0) # Corrección error flotante
+    
+    return state
+
