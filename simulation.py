@@ -371,6 +371,141 @@ class CRISIS_Model:
                     self.firms_state[f, self.IDX_FIRM_LIQUIDITY] += amt
                     self.banks_state[bank, self.IDX_BANK_LIQUIDITY] -= amt
 
+    def step_real_economy(self):
+        """
+        Phase 4: Real Economy (Production, Wages, Consumption).
+        
+        A. Firms convert Labor -> Goods (Production) and pay Wages (Liquidity -> Households).
+        B. Households consume Goods (Liquidity -> Firms).
+        """
+        # --- A. PRODUCTION & WAGES ---
+        
+        # 1. Production
+        # Inventory = Workers * Alpha
+        workers = self.firms_state[:, self.IDX_FIRM_WORKERS]
+        new_production = workers * Params.alpha
+        
+        # Current logic: Are goods durable? Usually yes, inventory accumulates.
+        # "Inventory_New = ..." imply adding to existing or just produced?
+        # Let's assume accumulation.
+        # Check if IDX_FIRM_PRODUCTION stores stock or flow. Ideally Stock.
+        # "Producción" in state usually means current stock available for sale.
+        self.firms_state[:, self.IDX_FIRM_PRODUCTION] += new_production
+        
+        # 2. Wage Payment
+        # Wage Bill was calculated in Phase 1 (Planning) but let's recalc or use state
+        # We stored it in IDX_FIRM_WAGES_PAID? 
+        # Actually in `step_firms_planning`, we set `self.firms_state[:, self.IDX_FIRM_WAGES_PAID] = wage_bill`
+        # as a liability record. Now we pay it.
+        
+        wage_bills = self.firms_state[:, self.IDX_FIRM_WAGES_PAID]
+        firm_liquidity = self.firms_state[:, self.IDX_FIRM_LIQUIDITY]
+        
+        # Can they pay?
+        # Ideally yes, if they got credit.
+        # Actual Payment = Min(Liquidity, Bill). If less, workers get partial wages (or firm goes bankrupt/defaults later).
+        # For this step, we assume they pay what they can.
+        payments = np.minimum(wage_bills, firm_liquidity)
+        
+        # Deduct from Firms
+        self.firms_state[:, self.IDX_FIRM_LIQUIDITY] -= payments
+        
+        # Add to Households
+        # Vectorized transfer: Use the Employer Map
+        # self.hh_employer_idx (H,) -> Index of firm
+        # We need to know how much EACH household gets.
+        # Assumption: All households working for Firm F get equal share of that firm's wage bill.
+        # Workers count per firm:
+        # We calculated `workers` vector (float).
+        # But we have discrete households.
+        # For the mapping to work, the number of households assigned to Firm F must match `workers`?
+        # In this simple model (Table I parameters), H=1300, F=100. Avg 13 workers/firm.
+        # `workers` computed in Phase 2 was "Labor Demand".
+        # Does the firm HIRE/FIRE?
+        # If Labor Demand != Current Employees, we need a Labor Market step (Matching).
+        # Phase 2 calculated "Required Workers".
+        # Phase 4 "Production" assumes they have them.
+        # To simplify without a complex labor market matching:
+        # We assume the `hh_employer_idx` is static or we just pay the demand distributed to *current* employees.
+        # Or, logically, the firm pays `wage_bills` to the set of households `where hh_employer_idx == f`.
+        # Let's calculate per-household wage for each firm.
+        
+        # Count actual employees per firm (Static topology for now)
+        employee_counts = np.bincount(self.hh_employer_idx, minlength=Params.F)
+        
+        # Avoid division by zero
+        wage_per_worker = np.zeros(Params.F)
+        mask = employee_counts > 0
+        np.divide(payments, employee_counts, out=wage_per_worker, where=mask)
+        
+        # Distribute to Households
+        # Each HH gets wage_per_worker[their_employer]
+        hh_income = wage_per_worker[self.hh_employer_idx]
+        
+        self.households_state[:, self.IDX_HH_DEPOSITS] += hh_income
+        
+        
+        # --- B. CONSUMPTION MARKET ---
+        
+        # 1. Budget
+        # B_h = Deposits * c
+        hh_deposits = self.households_state[:, self.IDX_HH_DEPOSITS]
+        budgets = hh_deposits * Params.c
+        
+        # 2. Firm Selection (Z-Search)
+        # Sample Z firms per household
+        # Shape (H, Z)
+        z_indices = self.rng.integers(0, Params.F, size=(Params.H, Params.Z_CONSUMPTION))
+        
+        # Get Prices: (H, Z)
+        prices_options = self.firms_state[z_indices, self.IDX_FIRM_PRICE]
+        
+        # Select min price
+        winner_local_indices = np.argmin(prices_options, axis=1) # (H,) 0 or 1
+        
+        # Map back to global Firm Index
+        # winner_global_idx[h] = z_indices[h, winner_local_indices[h]]
+        # Advanced indexing
+        winner_global_indices = z_indices[np.arange(Params.H), winner_local_indices]
+        
+        # 3. Aggregate Demand
+        # Sum budgets destined for each firm
+        demand_monetary = np.bincount(winner_global_indices, weights=budgets, minlength=Params.F)
+        
+        # 4. Sales & Rationing
+        firm_prices = self.firms_state[:, self.IDX_FIRM_PRICE]
+        firm_inventory = self.firms_state[:, self.IDX_FIRM_PRODUCTION]
+        
+        max_revenue = firm_inventory * firm_prices
+        
+        # Actual Revenue = Min(Demand, Max_Revenue)
+        actual_revenue = np.minimum(demand_monetary, max_revenue)
+        
+        # Sales Quantity = Revenue / Price (Safe division)
+        sales_qty = np.zeros(Params.F)
+        price_mask = firm_prices > 0
+        np.divide(actual_revenue, firm_prices, out=sales_qty, where=price_mask)
+        
+        # Rationing Magnitude (Scale Factor for Households)
+        # If Demand > Max_Revenue, households spent less than `budgets`.
+        # scale[f] = Actual_Rev / Demand[f]. 1.0 if full demand met.
+        scale_factors = np.ones(Params.F)
+        demand_mask = demand_monetary > 1e-9
+        np.divide(actual_revenue, demand_monetary, out=scale_factors, where=demand_mask)
+        
+        # 5. Execution
+        
+        # Firms: Receive Money, Lose Inventory
+        self.firms_state[:, self.IDX_FIRM_LIQUIDITY] += actual_revenue
+        self.firms_state[:, self.IDX_FIRM_PRODUCTION] -= sales_qty
+        
+        # Households: Pay Money
+        # Each household paid: Budget * Scale_Factor[Chosen_Firm]
+        hh_scale = scale_factors[winner_global_indices]
+        hh_expenditure = budgets * hh_scale
+        
+        self.households_state[:, self.IDX_HH_DEPOSITS] -= hh_expenditure
+
     def run_step(self):
         """Execute one simulation step."""
         # 1. Firms Planning
@@ -378,4 +513,7 @@ class CRISIS_Model:
         
         # 2. Banking Market
         self.step_banking_market()
+        
+        # 3. Real Economy
+        self.step_real_economy()
         

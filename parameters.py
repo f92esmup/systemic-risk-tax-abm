@@ -41,6 +41,10 @@ class Params:
     # Graph Topology
     CONNECTION_PROB_BB = 0.2 
     N_SEARCH = 5        # Number of banks a firm searches for credit
+    Z_CONSUMPTION = 2   # Number of firms a household samples for consumption
+    
+    # Households
+    c = 0.8             # Marginal propensity to consume (Updated)
     
     @classmethod
     def get_dict(cls):
