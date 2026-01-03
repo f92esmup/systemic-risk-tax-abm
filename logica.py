@@ -145,7 +145,8 @@ def ejecutar_mercado_interbancario_demanda(estado, deficit_liquidez, modo_impues
         activos = np.sum(estado.prestamos_banco_empresa[idx_prestatario]) + np.sum(estado.matriz_interbancaria[idx_prestatario])
         patrimonio = max(estado.patrimonio_bancos[idx_prestatario], 0.1)
         leverage = activos / patrimonio
-        prob_default_prestatario = np.tanh(leverage) # 0 a 1 aprox
+        # Factor de escala 0.01 según Apéndice A.3
+        prob_default_prestatario = 0.01 * np.tanh(leverage) 
         
         for idx_prestamista in candidatos:
             disponible = estado.efectivo_bancos[idx_prestamista]
@@ -532,8 +533,6 @@ def calcular_debtrank(matriz_interbancaria, patrimonio_bancos):
         total_rs += dr_k
         
     return total_rs
-
-    return estado, len(nuevos_defaults_totales)
 
 def ejecutar_contagio_interbancario(estado):
     """
