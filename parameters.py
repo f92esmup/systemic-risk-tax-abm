@@ -11,42 +11,49 @@ class Params:
     H = 1300            # Number of Households
     
     # --- Economic Parameters (Table I) ---
-    # Firms
-    gamma = 0.5         # Input substitutability parameter
-    alpha = 0.1         # Labor productivity (updated from 0.2 to match user prompt)
     
-    WAGE = 1.0          # Fixed wage
-    PRICE_ADJUSTMENT_SPEED = 0.05   # Price adjustment speed parameter (beta/lambda)
-    PRICE_DRIFT_STD = 0.01          # Standard deviation for random price fluctuation
+    # Labor & Production
+    WAGE = 1.0          # Wage rate (wb)
+    alpha = 0.1         # Labor productivity
+    
+    # Consumption
+    c = 0.8             # Marginal propensity to consume (High velocity!)
+    Z_CONSUMPTION = 2   # Number of firms sampled by households (z)
 
-    # Banks
-    r_bar = 0.02        # Central bank baseline interest rate (2%)
-    phi = 0.2           # Bank capital adequacy target
+    # Banking & Credit
+    r_bar = 0.02        # Central bank baseline interest rate
+    N_SEARCH = 5        # Number of banks a firm searches for credit (n)
     
-    tau = 0.1           # Tax rate or similar
+    # Debt & Regulation
+    DEBT_REPAYMENT_RATE = 0.05 # Rate of debt reimbursement (tau)
     
-    # Households
-    c = 0.2             # Marginal propensity to consume
-
-    DIV_SHARE = 0.2     # Dividends share
-    DIVIDEND_RATIO = 0.2 # Alias
-    DEBT_REPAYMENT_RATE = 0.05 # Fraction of debt repaid per step
+    # Note: 'phi' in paper is "Credit demand contraction" = 0.8.
+    # It is NOT capital adequacy. We use a separate constant for init if needed.
+    PHI_DEMAND_CONTRACTION = 0.8 
     
-    # Paper specific tax rates
+    # Dividends
+    DIVIDEND_RATIO = 0.2 # Share of dividends (div)
+    
+    # Taxes
     TAX_TOBIN_RATE = 0.002 # 0.2%
-    TAX_SRT_ZETA = 1.0     # Sensitivity for SRT
+    TAX_SRT_ZETA = 0.02    # Sensitivity for SRT (Main text uses 0.02)
+    # TAX_SRT_ZETA = 1.0   # Use this for "Appendix B" strong mode
     
-    # Initialization Distributions (ranges)
-    INIT_BANK_ASSETS = (200, 800) 
-    INIT_FIRM_ASSETS = (10, 50)
+    # --- Algorithm / Simulation parameters (Not in Table I but required) ---
     
-    # Graph Topology
-    CONNECTION_PROB_BB = 0.2 
-    N_SEARCH = 5        # Number of banks a firm searches for credit
-    Z_CONSUMPTION = 2   # Number of firms a household samples for consumption
+    # Price adjustment (Equation logic)
+    PRICE_ADJUSTMENT_SPEED = 0.05   
+    PRICE_DRIFT_STD = 0.01          
+
+    # Initialization Distributions
+    # To fix "Empty Volume", agents must start with LESS cash relative to needs.
+    # If Liquidity is high, they don't borrow.
+    # We set initial assets to be moderate.
+    INIT_BANK_ASSETS = (1000, 2000) 
+    INIT_FIRM_ASSETS = (5, 15)   # Firms start small
     
-    # Households
-    c = 0.8             # Marginal propensity to consume (Updated)
+    # Capital Adequacy for Initialization (Not phi from Table I, but standard Basel)
+    INIT_CAPITAL_RATIO = 0.10    # 10% Equity initially
     
     @classmethod
     def get_dict(cls):

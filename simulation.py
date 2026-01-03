@@ -71,17 +71,25 @@ class CRISIS_Model:
         self.households_state = np.zeros((H, self.N_HH_FEATURES), dtype=np.float64)
 
         # --- 2. Random Vectorized Initialization ---
-        # Initialize Bank Equity/Assets uniformly for now (Ref: Appendix A often implies random init)
-        # Adjust values based on calibration needs later
-        # Example: Banks differ in size
-        self.banks_state[:, self.IDX_BANK_EQUITY] = self.rng.uniform(10, 20, size=B)
-        self.banks_state[:, self.IDX_BANK_LIQUIDITY] = self.banks_state[:, self.IDX_BANK_EQUITY] * 0.1 # 10% cash
-        
+        # Initialize Bank Assets
+        init_bank_assets = self.rng.uniform(Params.INIT_BANK_ASSETS[0], Params.INIT_BANK_ASSETS[1], size=B)
+        # Equity = Assets * Capital Ratio
+        self.banks_state[:, self.IDX_BANK_EQUITY] = init_bank_assets * Params.INIT_CAPITAL_RATIO
+        # Liquidity = Assets (Assuming start with all liquid assets, no loans yet)
+        self.banks_state[:, self.IDX_BANK_LIQUIDITY] = init_bank_assets
+        # Deposits = Assets - Equity
+        self.banks_state[:, self.IDX_BANK_DEPOSITS] = init_bank_assets - self.banks_state[:, self.IDX_BANK_EQUITY]
+
         # Initialize Firms
-        self.firms_state[:, self.IDX_FIRM_EQUITY] = self.rng.uniform(5, 10, size=F)
-        self.firms_state[:, self.IDX_FIRM_LIQUIDITY] = self.firms_state[:, self.IDX_FIRM_EQUITY] * 0.2
-        self.firms_state[:, self.IDX_FIRM_PRICE] = 1.0
-        self.firms_state[:, self.IDX_FIRM_PRICE_PREV] = 1.0
+        init_firm_assets = self.rng.uniform(Params.INIT_FIRM_ASSETS[0], Params.INIT_FIRM_ASSETS[1], size=F)
+        self.firms_state[:, self.IDX_FIRM_EQUITY] = init_firm_assets
+        self.firms_state[:, self.IDX_FIRM_LIQUIDITY] = init_firm_assets
+        
+        # Initialize Price to Marginal Cost (Breakeven)
+        # MC = Wage / Alpha
+        init_price = Params.WAGE / Params.alpha
+        self.firms_state[:, self.IDX_FIRM_PRICE] = init_price
+        self.firms_state[:, self.IDX_FIRM_PRICE_PREV] = init_price
 
 
         # --- 3. Topology & Relationships ---
@@ -537,12 +545,10 @@ class CRISIS_Model:
         # Reset Step Metrics
         self.current_step_loss = 0.0
         self.current_step_defaults = 0
-        self.current_step_volume = 0.0 # Note: volume accumulator is actually in banking market, so don't reset here if called AFTER banking.
-        # But run_step order is: Planning -> Banking (Vol adds) -> Real -> Accounting.
-        # So we should reset volume at START of run_step, or rely on main to read it before next step?
-        # Better: Reset at start of `run_step`. Or reset here if we assume this is end of step, but volume was ALREADY calculated.
-        # Wait, if I reset volume here, I lose what banking market did.
-        # I should NOT reset volume here. I will reset it in `run_step`.
+        # Reset Step Metrics
+        self.current_step_loss = 0.0
+        self.current_step_defaults = 0
+        # self.current_step_volume = 0.0 # Removed to prevent overwriting banking market data
         
         
         # --- A. DEBT REPAYMENT ---
@@ -715,7 +721,7 @@ class CRISIS_Model:
             init_assets = self.rng.uniform(Params.INIT_BANK_ASSETS[0], Params.INIT_BANK_ASSETS[1], size=len(final_dead_banks))
             # Reset Equity
             # Assets = Equity + Liabilities. Assume 0 Liabilities initially.
-            self.banks_state[final_dead_banks, self.IDX_BANK_EQUITY] = init_assets * Params.phi # phi * Assets capital
+            self.banks_state[final_dead_banks, self.IDX_BANK_EQUITY] = init_assets * Params.INIT_CAPITAL_RATIO # using Initial Capital Ratio
             self.banks_state[final_dead_banks, self.IDX_BANK_LIQUIDITY] = init_assets # Cash
             
             # Clear all connections involving dead banks
