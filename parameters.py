@@ -29,14 +29,16 @@ class Params:
     c = 0.2             # Marginal propensity to consume
 
     DIV_SHARE = 0.2     # Dividends share
+    DIVIDEND_RATIO = 0.2 # Alias
+    DEBT_REPAYMENT_RATE = 0.05 # Fraction of debt repaid per step
     
     # Paper specific tax rates
     TAX_TOBIN_RATE = 0.002 # 0.2%
     TAX_SRT_ZETA = 1.0     # Sensitivity for SRT
     
     # Initialization Distributions (ranges)
-    INIT_BANK_ASSETS = (100, 200) 
-    INIT_FIRM_ASSETS = (50, 100)
+    INIT_BANK_ASSETS = (200, 800) 
+    INIT_FIRM_ASSETS = (10, 50)
     
     # Graph Topology
     CONNECTION_PROB_BB = 0.2 
