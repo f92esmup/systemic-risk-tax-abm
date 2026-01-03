@@ -153,3 +153,100 @@ def step2_banks_lending(state):
 def firm_stock_value(state):
     # Helper para valorar inventario (precio * cantidad)
     return state.firm_stock * state.firm_prices
+
+def step3_production(state):
+    """
+    Paso 3: Mercado Laboral y Producción.
+    
+    Lógica Tensorial:
+    1. Determinar presupuesto laboral máximo por firma (limited by Cash).
+    2. Determinar demanda laboral efectiva N_desired = min(Planned, Budget/Wage).
+    3. Mercado Laboral (Matching):
+       - Oferta Total = N_HOUSEHOLDS (Asumimos todos quieren trabajar por ahora).
+       - Demanda Total = sum(N_desired).
+       - Si Demanda > Oferta -> Racionamiento.
+       - Asignamos trabajadores a firmas (actualizamos household_employer).
+    4. Pago de Salarios:
+       - Firmas pagan w * Hired.
+       - Hogares reciben w.
+    5. Producción:
+       - Y_real = alpha * Hired.
+       - Stock += Y_real.
+    """
+    
+    # 1. Restricción Presupuestaria
+    # Cuántos trabajadores puede pagar la firma con su caja actual?
+    # affordable_workers = floor(cash / wage)
+    max_affordable_labor = np.floor(state.firm_cash / WAGE_RATE)
+    
+    # 2. Demanda Efectiva (limitada por plan y por dinero)
+    # state.firm_labor_demand viene del Paso 1
+    desired_labor = np.minimum(state.firm_labor_demand, max_affordable_labor)
+    
+    total_labor_demand = np.sum(desired_labor)
+    total_labor_supply = N_HOUSEHOLDS
+    
+    # 3. Matching / Racionamiento
+    # Vector de trabajadores contratados por firma
+    firm_hired_workers = np.zeros(N_FIRMS, dtype=np.int32)
+    
+    if total_labor_demand <= total_labor_supply:
+        # Hay suficientes trabajadores
+        firm_hired_workers = np.floor(desired_labor).astype(np.int32)
+        # Asignación de empleadores a hogares (Simplificado: Llenado buckets)
+        # En una simulación real tensorial, mantener el link exacto es costoso si barajamos cada turno.
+        # Aquí regeneramos el mapa de empleo por simplicidad del paso.
+        pass # Se hará en el bloque de asignación abajo
+    else:
+        # Escasez de trabajadores (Caso Típico con params actuales: 10k demand vs 1.3k supply)
+        # Racionamiento proporcional o aleatorio?
+        # Proporcional: Cada firma recibe (Supply/Demand) * Desired
+        rationing_ratio = total_labor_supply / total_labor_demand
+        firm_hired_workers = np.floor(desired_labor * rationing_ratio).astype(np.int32)
+        
+        # Ajuste de redondeo: Si sobran trabajadores por el floor, asignarlos al azar
+        current_hired = np.sum(firm_hired_workers)
+        remainder = total_labor_supply - current_hired
+        if remainder > 0:
+            lucky_firms = np.random.choice(N_FIRMS, int(remainder), replace=True) # O replace=False
+            np.add.at(firm_hired_workers, lucky_firms, 1)
+            
+    # Actualizar estado de empleadores de hogares
+    # Reseteamos empleos actuales
+    state.household_employer[:] = -1
+    
+    # Asignación vectorial 'flat'
+    # Creamos un vector de IDs de firmas repetidos tantas veces como trabajadores contrataron
+    # Ej: Firma 0 contrata 2 -> [0, 0, Firma 1 contrata 1 -> 1...]
+    employer_ids = np.repeat(np.arange(N_FIRMS), firm_hired_workers)
+    
+    # Limitamos a N_HOUSEHOLDS por seguridad (si hubo error de redondeo arriba)
+    assigned_count = min(len(employer_ids), N_HOUSEHOLDS)
+    employer_ids = employer_ids[:assigned_count]
+    
+    # Asignamos a los primeros H hogares (podríamos barajar households para realismo)
+    # random_households = np.random.permutation(N_HOUSEHOLDS)
+    # state.household_employer[random_households[:assigned_count]] = employer_ids
+    # Por ahora directo 0..N
+    state.household_employer[:assigned_count] = employer_ids
+    
+    # 4. Pago de Salarios y Flujos
+    wages_paid = firm_hired_workers * WAGE_RATE
+    
+    state.firm_cash -= wages_paid
+    
+    # Hogares reciben salario
+    # Usamos np.add.at para sumar salarios a los hogares empleados (aunque w es cte, es mas general)
+    # Aquí: household_cash += WAGE_RATE donde employer != -1
+    employed_mask = state.household_employer != -1
+    state.household_cash[employed_mask] += WAGE_RATE
+    
+    # 5. Producción Real y Stock
+    actual_production = firm_hired_workers * LABOR_PRODUCTIVITY
+    state.firm_stock += actual_production
+    
+    # Guardamos producción real para métricas si hiciera falta
+    # state.firm_planned_production se sobreescribe o mantenemos diff?
+    # Por ahora solo stock importa para venta.
+    
+    return state
