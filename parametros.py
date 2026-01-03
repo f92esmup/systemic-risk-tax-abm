@@ -1,0 +1,44 @@
+
+# Parámetros del Modelo (Tabla I - Poledna & Thurner, 2014)
+
+# Dimensiones de la población
+N_BANCOS = 20           # Antes N_BANKS
+N_EMPRESAS = 100        # Antes N_FIRMS
+N_HOGARES = 1300        # Antes N_HOUSEHOLDS
+
+# Parámetros Económicos
+PORCENTAJE_DIVIDENDOS = 0.2     # DIVIDENDS_SHARE
+TASA_REFINANCIACION = 0.02      # REFINANCING_RATE
+PRODUCTIVIDAD_LABORAL = 0.1     # LABOR_PRODUCTIVITY
+CONTRACCION_DEMANDA_CREDITO = 0.8 # CREDIT_DEMAND_CONTRACTION (phi)
+TASA_REEMBOLSO_DEUDA = 0.05     # DEBT_REIMBURSEMENT_RATE (tau)
+TASA_SALARIAL = 1.0             # WAGE_RATE
+PROPENSION_CONSUMO = 0.8        # PROPENSITY_TO_CONSUME
+
+# Parámetros de Tasas e Intereses (Apéndice A)
+TASA_INTERES_MAXIMA = 0.20      # MAX_INTEREST_RATE
+# Para la función tangente hiperbólica de riesgo:
+SENSIBILIDAD_RIESGO = 1.0       # RISK_SENSITIVITY
+
+# Parámetros de Interacción de Mercado
+N_SOLICITUDES_CONSUMO = 2       # N_CONSUMPTION_APPS
+N_SOLICITUDES_CREDITO = 5       # N_CREDIT_APPS
+
+# Parámetros Mercado Interbancario y Tax
+RATIO_COLCHON_LIQUIDEZ = 0.10   # LIQUIDITY_BUFFER_RATIO
+SENSIBILIDAD_IRS = 1.0          # SRT_SENSITIVITY (IRS = Impuesto Riesgo Sistémico)
+LGD_INTERBANCARIO = 1.0         # INTERBANK_LGD
+TASA_INTERBANCARIA = 0.005      # INTERBANK_RATE
+
+# Parámetros de Adaptación (Aprendizaje)
+VELOCIDAD_ADAPTACION = 0.2      # ADAPTATION_SPEED
+TASA_AJUSTE_PRECIO = 0.02       # PRICE_ADJUSTMENT_RATE
+
+# Parámetros Simulación
+PASOS_SIMULACION = 500          # SIMULATION_STEPS
+TASA_ITF = 0.002                # FTT_RATE (ITF = Impuesto Transacción Financiera)
+
+# Configuración Inicial
+EFECTIVO_INICIAL_EMPRESA = 20.0     # INITIAL_FIRM_CASH
+PATRIMONIO_INICIAL_BANCO = 2000.0   # INITIAL_BANK_EQUITY
+EFECTIVO_INICIAL_HOGAR = 100.0      # INITIAL_HOUSEHOLD_CASH
