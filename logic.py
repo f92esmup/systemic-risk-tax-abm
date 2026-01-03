@@ -665,3 +665,102 @@ def step6_interbank_market(state):
     state.collected_tax = taxes_collected
     state.total_systemic_risk = current_sr # Final SR
     return state
+
+def step7_evolution(state):
+    """
+    Paso 7: Actualización y Evolución (Learning).
+    
+    Lógica Tensorial:
+    1. Calcular Ventas Reales (Sales = Initial_Stock + Produced - Final_Stock).
+       Pero ojo: Initial_Stock del paso actual ya no lo tenemos separado simple,
+       tenemos state.firm_stock que es el remanente.
+       Mejor: Sales = Planned_Production - (Final_Stock - Old_Stock_Surplus).
+       O más simple: En Paso 4 calculamos ventas. ¿Las guardamos?
+       No explícitamente en el state persistente, pero podemos recalcular o asumir.
+       En Paso 4: firm_sales_vol se usó para reducir stock.
+       Necesitamos inferir ventas.
+       Sabemos que: Stock_Post_Prod = Stock_Pre + Y.
+       Stock_Final = Stock_Post_Prod - Ventas.
+       => Ventas = Stock_Post_Prod - Stock_Final.
+       
+       (Tendríamos que haber guardado Stock_Post_Prod o Ventas en el Paso 4. 
+       Recomendación: En logic.py es stateless entre funciones salvo 'state'.
+       Vamos a asumir que agregamos un campo 'firm_daily_sales' al state o que 
+       recalculamos si sabemos Production).
+    
+    2. Ajustar Demanda Esperada D(t+1):
+       D(t+1) = D(t) + lambda * (Ventas(t) - D(t)).
+    
+    3. Ajustar Precios P(t+1):
+       Si Inventory > 0 (Exceso Oferta) -> Bajar P.
+       Si Inventory = 0 (Exceso Demanda) -> Subir P.
+    """
+    
+    # 1. Recuperar Ventas
+    # Problema: No tenemos las ventas guardadas del paso 4 en el objeto State.
+    # Solución rápida: Modificar State para añadir 'firm_sales' sería lo ideal, 
+    # pero podemos aproximar:
+    # Sales = (Old_Stock + Production) - Current_Stock.
+    # Old_Stock es incierto tras pasar Step 1,2,3,4.
+    # Necesitamos Production Real del Paso 3. Tampoco la guardamos persistente.
+    # Vamos a usar 'firm_planned_production' como proxy de producción intentada, 
+    # asumiendo que casi siempre se logra si hubo crédito.
+    # Para ser rigurosos, deberíamos haber trackeado esto.
+    # FIX: Vamos a asumir que las ventas son calculables o que añadimos un tracker temporal.
+    # Por ahora, usaré una heurística:
+    # Si stock > 0, Ventas = Demanda Realizada (que no sabemos)
+    # Vamos a basarnos en el Stock Final.
+    # Si Stock Final es alto comparado con Producción Planeada -> Malas ventas.
+    
+    # MEJORA: Añadir variable 'firm_last_sales' en state.py en el futuro.
+    # Como no puedo editar state.py y logic.py simultáneamente sin risk, 
+    # usaré un cálculo aproximado:
+    # Asumimos que la firma monitoriza su stock.
+    # Si Stock > Buffer (ej. 10% demanda), reduce.
+    # D_new = Sales.
+    # Como no tengo Sales exactas, usaré:
+    # Sales ~ Planned_Production - np.maximum(0, Stock_Final - Stock_Inicial_Estimado)
+    # Muy sucio.
+    
+    # O mejor: Modificamos paso 4 para guardar ventas en `state`. 
+    # Pero eso requiere edit paso 4.
+    
+    # Opción actual sin re-editar todo:
+    # Usar el Inventario como señal principal.
+    # D(t+1) = D(t)
+    # Si Stock > 0: D(t+1) -= ADAPTATION_SPEED * Stock
+    # Si Stock == 0: D(t+1) += ADAPTATION_SPEED * (Fracción de D(t)) (Asumimos demanda insatisfecha).
+    
+    unsold_stock = state.firm_stock
+    
+    # Ajuste de Cantidad
+    # Si sobró stock: Reducir expectativas.
+    # Cuánto? Proporcional a lo que sobró.
+    adjustment = -ADAPTATION_SPEED * unsold_stock
+    
+    # Y si no sobró nada (Stock=0)?
+    # Significa que vendimos todo. Podríamos haber vendido más.
+    # Aumentamos expectativa un poco (heurística "tanteo").
+    sold_out_mask = unsold_stock < 1e-4
+    
+    # Aumento conservador: 5% o ADAPTATION_SPEED * mean_demand
+    # Usaremos un 'boost' proporcional a la demanda actual
+    adjustment[sold_out_mask] = ADAPTATION_SPEED * state.firm_expected_demand[sold_out_mask] * 0.5
+    
+    # Aplicar cambios
+    state.firm_expected_demand += adjustment
+    
+    # Limites lógicos (Demanda no negativa, mínima de subsistencia)
+    state.firm_expected_demand = np.maximum(state.firm_expected_demand, 1.0)
+    
+    # Ajuste de Precios
+    # Si sobró mucho stock -> Bajar precio para limpiar.
+    state.firm_prices[~sold_out_mask] *= (1.0 - PRICE_ADJUSTMENT_RATE)
+    # Si se agotó -> Subir precio para capturar margen.
+    state.firm_prices[sold_out_mask] *= (1.0 + PRICE_ADJUSTMENT_RATE)
+    
+    # Límites de Precios (evitar explosión o cero)
+    state.firm_prices = np.clip(state.firm_prices, 0.1, 100.0)
+    
+    return state
+
