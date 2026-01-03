@@ -49,7 +49,7 @@ class Params:
     # To fix "Empty Volume", agents must start with LESS cash relative to needs.
     # If Liquidity is high, they don't borrow.
     # We set initial assets to be moderate.
-    INIT_BANK_ASSETS = (1000, 2000) 
+    INIT_BANK_ASSETS = (100, 300) 
     INIT_FIRM_ASSETS = (5, 15)   # Firms start small
     
     # Capital Adequacy for Initialization (Not phi from Table I, but standard Basel)

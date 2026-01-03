@@ -751,3 +751,6 @@ class CRISIS_Model:
         # 4. Accounting & Reset
         self.step_accounting()
         
+        # 5. Traceability
+        self.record_history()
+        

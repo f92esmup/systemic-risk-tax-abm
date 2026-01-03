@@ -49,15 +49,16 @@ def main():
     # Configuration matches Paper (roughly)
     # T=500, Runs=50 (Paper uses more, but we want speed for demo)
     # But for prompt compliance, I will try n_runs=15 to balance speed/results
-    N_RUNS = 15 
-    STEPS = 200 # Paper uses 500-1000. 200 should be enough to see crises.
+    N_RUNS = 10000 
+    STEPS = 500 # Paper uses 500-1000. 200 should be enough to see crises.
     
     # 1. Run Baseline (No Tax)
     data_base = run_experiment('none', 0.0, n_runs=N_RUNS, steps=STEPS)
     
     # 2. Run SRT (Systemic Risk Tax)
-    # Zeta = 1.0 typically
-    data_srt = run_experiment('srt', 1.0, n_runs=N_RUNS, steps=STEPS)
+    # Zeta = 0.02 (Main text), 1.0 (Strong / Appendix B)
+    # We use 0.02 to match Figure 4a
+    data_srt = run_experiment('srt', 0.02, n_runs=N_RUNS, steps=STEPS)
     
     # 3. (Optional) Tobin Tax
     # Rate = 0.2% = 0.002
