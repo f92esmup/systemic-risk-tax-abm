@@ -26,7 +26,7 @@ N_CREDIT_APPS = 5      # n
 
 # Parámetros Mercado Interbancario y Tax
 LIQUIDITY_BUFFER_RATIO = 0.10 # % de Activos (Loans) que se desea en Cash
-SRT_SENSITIVITY = 0.5   # zeta ajustado. 1.0 puede ser alto para redes pequeñas. Probamos 0.5.
+SRT_SENSITIVITY = 1.0   # zeta = 1.0 (Valor estándar del paper)
 INTERBANK_LGD = 1.0     # Loss Given Default en interbancario (Asumimos pérdida total si quiebra)
 INTERBANK_RATE = 0.005  # Tasa interbancaria base (muy baja, overnight)
 
@@ -35,8 +35,8 @@ ADAPTATION_SPEED = 0.2  # lambda (Ajuste de expectativas de demanda)
 PRICE_ADJUSTMENT_RATE = 0.02 # delta (Ajuste de precios ante desequilibrios)
 
 # Parámetros Simulación
-SIMULATION_STEPS = 20   # T (Duración de la simulación) - Aumentado para ver evolución
-FTT_RATE = 0.001        # Tasa FTT (0.1% por transacción interbancaria)
+SIMULATION_STEPS = 50   # T (Duración de la simulación) - Restaurado a 50
+FTT_RATE = 0.002        # Tasa FTT (0.2% por transacción interbancaria)
 
 
 

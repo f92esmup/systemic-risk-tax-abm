@@ -6,7 +6,7 @@ from state import EconomyState
 from logic import (
     step1_firms_planning, step2_banks_lending, step3_production, 
     step4_consumption, step5_firm_repayment, step6_interbank_market, 
-    step7_evolution
+    step7_evolution, run_interbank_contagion
 )
 from parameters import *
 
@@ -50,6 +50,10 @@ class SimulationRunner:
             
             # --- Paso 5: Repago y Quiebras Firmas ---
             state = step5_firm_repayment(state)
+            
+            # --- Paso 5b: Contagio Interbancario (Shock Externo) ---
+            # Si las firmas quebraron bancos, los bancos acreedores sufren pérdidas YA.
+            state = run_interbank_contagion(state)
             
             # --- Paso 6: Interbancario y Tax ---
             state = step6_interbank_market(state, tax_mode=tax_mode)

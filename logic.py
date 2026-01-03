@@ -192,7 +192,8 @@ def step3_production(state):
     
     if total_labor_demand <= total_labor_supply:
         # Hay suficientes trabajadores
-        firm_hired_workers = np.floor(desired_labor).astype(np.int32)
+        safe_desired = np.maximum(0, desired_labor)
+        firm_hired_workers = np.floor(safe_desired).astype(np.int32)
         # Asignación de empleadores a hogares (Simplificado: Llenado buckets)
         # En una simulación real tensorial, mantener el link exacto es costoso si barajamos cada turno.
         # Aquí regeneramos el mapa de empleo por simplicidad del paso.
@@ -202,7 +203,10 @@ def step3_production(state):
         # Racionamiento proporcional o aleatorio?
         # Proporcional: Cada firma recibe (Supply/Demand) * Desired
         rationing_ratio = total_labor_supply / total_labor_demand
-        firm_hired_workers = np.floor(desired_labor * rationing_ratio).astype(np.int32)
+        
+        # Asegurar que no sea negativo antes del floor
+        safe_desired = np.maximum(0, desired_labor)
+        firm_hired_workers = np.floor(safe_desired * rationing_ratio).astype(np.int32)
         
         # Ajuste de redondeo: Si sobran trabajadores por el floor, asignarlos al azar
         current_hired = np.sum(firm_hired_workers)
@@ -526,15 +530,73 @@ def calculate_debtrank(interbank_matrix, bank_equity):
         
     return total_sr
 
+def run_interbank_contagion(state):
+    """
+    Motor de Contagio Recursivo (Cascadas de Quiebras).
+    Se ejecuta tras shocks externos (Paso 5) o internos (Paso 6).
+    """
+    # 1. Detectar Quiebras Iniciales
+    # Un banco quiebra si Equity < 0.
+    defaulted_banks = state.bank_equity < 0
+    
+    # Necesitamos saber quiénes ya fueron procesados para no aplicar pérdidas dobles
+    # (Asumimos que si bank_equity < 0, ya está 'muerto', pero sus deudas se liquidan una vez)
+    # Usaremos una máscara de 'processed_defaults' o simplemente iteramos mientras haya NUEVOS defaults.
+    
+    # Mejor enfoque: Iterar mientras haya bancos con Equity < 0 que tengan pasivos interbancarios
+    # que aún no han impactado a sus acreedores.
+    # Simplificación: En cada step, si Equity < 0, se considera default.
+    # Pero las pérdidas solo se propagan una vez.
+    # Vamos a usar un set temporal para este 'run'.
+    
+    newly_defaulted = list(np.where(defaulted_banks)[0])
+    processed_defaults = set()
+    
+    # Bucle de Cascada
+    while len(newly_defaulted) > 0:
+        current_defaulter = newly_defaulted.pop(0)
+        
+        if current_defaulter in processed_defaults:
+            continue
+            
+        processed_defaults.add(current_defaulter)
+        
+        # 2. Identificar Acreedores (Quién prestó a current_defaulter)
+        # Matriz A[i, j]: i prestó a j.
+        # Buscamos i tal que A[i, current_defaulter] > 0.
+        lenders_idx = np.where(state.interbank_matrix[:, current_defaulter] > 0)[0]
+        
+        for lender in lenders_idx:
+            # Calcular Pérdida
+            exposure = state.interbank_matrix[lender, current_defaulter]
+            loss = exposure * INTERBANK_LGD
+            
+            # Aplicar Pérdida
+            state.bank_equity[lender] -= loss
+            
+            # Borrar la deuda (Write-off)
+            state.interbank_matrix[lender, current_defaulter] = 0.0
+            
+            # Registro (bad debt interbancario no está en state explicitamente, se resta de equity)
+            
+            # Chequear si este lender ahora también quiebra
+            if state.bank_equity[lender] < 0 and lender not in processed_defaults and lender not in newly_defaulted:
+                newly_defaulted.append(lender)
+                
+    return state
+
 def step6_interbank_market(state, tax_mode='SRT'):
     """
-    Paso 6: Mercado Interbancario con Selección de Impuesto.
-    Modes: 'NONE', 'FTT', 'SRT'
+    Paso 6: Mercado Interbancario Racional (Best Quote) con SRT.
+    
+    Lógica Refinada:
+    1. Identificar déficit/superávit.
+    2. Bancos deficitarios solicitan cotizaciones a M bancos potenciales.
+    3. Eligen la cotización con menor COSTO TOTAL (Tasa + Tax).
+    4. Se calcula y aplica SRT dinámico.
     """
     
-    # 1. Calcular Liquidez Objetivo
-    # Assets = Loans to Firms (Activos Reales) + Interbank Loans (Activos Fin)
-    # (Ignoramos cash como activo para el cálculo del buffer recursivo)
+    # 1. Calcular Liquidez
     real_assets = np.sum(state.bank_firm_loans, axis=1) # (B,)
     interbank_assets = np.sum(state.interbank_matrix, axis=1) # (B,)
     total_assets = real_assets + interbank_assets
@@ -542,110 +604,118 @@ def step6_interbank_market(state, tax_mode='SRT'):
     target_liquidity = total_assets * LIQUIDITY_BUFFER_RATIO
     liquidity_gap = target_liquidity - state.bank_cash
     
-    # Identificar jugadores
-    borrowers = np.where(liquidity_gap > 1.0)[0] # Necesitan cash
-    lenders = np.where(liquidity_gap < -1.0)[0]  # Sobra cash (Gap negativo -> Surplus)
+    borrowers = np.where(liquidity_gap > 1.0)[0]
+    lenders = np.where(liquidity_gap < -1.0)[0]
     
-    # Barajar para orden aleatorio
+    # Barajar orden de turno de los borrowers (quien llega primero al mercado)
     np.random.shuffle(borrowers)
     
-    # SR Inicial
+    # Pre-calcular SR actual
     current_sr = calculate_debtrank(state.interbank_matrix, state.bank_equity)
-    state.total_systemic_risk = current_sr # Guardar métrica
+    state.total_systemic_risk = current_sr
     
     taxes_collected = 0.0
+    
+    # Parámetro de sondeo (cuantos bancos consultar)
+    N_QUOTES = 5 
     
     for borrower_idx in borrowers:
         needed = liquidity_gap[borrower_idx]
         if needed < 1.0: continue
         
-        # Buscar prestamista
-        # Estrategia simple: Probar Lenders al azar
-        potential_lenders = lenders.copy()
-        np.random.shuffle(potential_lenders)
+        # Identificar posibles prestamistas (tienen surplus)
+        # Actualizamos lenders dinámicamente porque se les acaba el cash
+        current_lenders = lenders[liquidity_gap[lenders] < -1.0]
+        if len(current_lenders) == 0: break
         
-        for lender_idx in potential_lenders:
-            if needed < 1e-2: break 
+        # Seleccionar candidatos para pedir cotización (Random subset)
+        if len(current_lenders) > N_QUOTES:
+            candidates = np.random.choice(current_lenders, N_QUOTES, replace=False)
+        else:
+            candidates = current_lenders
             
-            # Cuánto puede prestar?
-            surplus = -liquidity_gap[lender_idx] # Gap es negativo -> Surplus positivo
-            if surplus < 1.0: continue
-            
+        # Evaluar ofertas
+        best_lender = -1
+        best_cost_rate = float('inf')
+        best_tax = 0.0
+        best_amount = 0.0
+        
+        # Calcular denominador SR para normalización (Fijo para este paso o recalculado?)
+        # Paper Eq 3: Tax proportional to marginal increase.
+        total_system_equity = max(np.sum(state.bank_equity), 1.0)
+        
+        for lender_idx in candidates:
+            surplus = -liquidity_gap[lender_idx]
             amount = min(needed, surplus)
             
-            # --- CÁLCULO DE IMPUESTO ---
-            tax_amount = 0.0
-            
-            # Variables de riesgo
-            delta_sr = 0.0
-            
+            # Simular Tax
+            tax = 0.0
             if tax_mode == 'SRT':
-                # Simular Impacto Sistémico
+                # Simular link
                 sim_matrix = state.interbank_matrix.copy()
                 sim_matrix[lender_idx, borrower_idx] += amount
-                new_sr = calculate_debtrank(sim_matrix, state.bank_equity)
-                delta_sr = max(0.0, new_sr - current_sr)
                 
-                total_system_equity = np.sum(state.bank_equity)
-                normalized_delta_sr = delta_sr / max(total_system_equity, 1.0)
+                # Calcular Delta SR
+                # OPTIMIZACIÓN: Calcular SR completo es costoso (O(N^3) o parecido).
+                # En simulación real se hace. Aquí N=20 es rápido.
+                new_sr_sim = calculate_debtrank(sim_matrix, state.bank_equity)
+                delta_sr = max(0.0, new_sr_sim - current_sr)
                 
-                tax_amount = amount * SRT_SENSITIVITY * normalized_delta_sr
+                normalized_delta = delta_sr / total_system_equity
+                tax = amount * SRT_SENSITIVITY * normalized_delta
                 
             elif tax_mode == 'FTT':
-                # Tobin Tax flat rate
-                tax_amount = amount * FTT_RATE
-                
-            elif tax_mode == 'NONE':
-                tax_amount = 0.0
+                tax = amount * FTT_RATE
             
-            real_tax = tax_amount
+            # Calcular Costo Total Efectivo (Tasa Interés + Tax rate equivalente)
+            # Costo = (i * L) + Tax.
+            # Effective Rate = i + (Tax/L).
+            interest_cost = amount * INTERBANK_RATE
+            total_cost_abs = interest_cost + tax
+            effective_rate = total_cost_abs / amount if amount > 0 else float('inf')
             
-            # --- DECISIÓN ---
-            # El borrower acepta si (Interbank_Rate * Amount + Tax) < Costo Alternativo?
-            # Por ahora asumimos que acepta si tiene cash para pager el tax (o se deduce del prestamo).
-            # Si el tax > amount, absurdo.
+            if effective_rate < best_cost_rate:
+                best_cost_rate = effective_rate
+                best_lender = lender_idx
+                best_tax = tax
+                best_amount = amount
+        
+        # Ejecutar la mejor opción si es viable
+        if best_lender != -1 and best_cost_rate < 0.20: # Cap máximo de tasa user-defined (ej 20%)
+            # Transferencia
+            lender_idx = best_lender
+            amount = best_amount
+            tax = best_tax
             
-            total_cost_upfront = real_tax
-            
-            # Verificamos si vale la pena (Tax < 10% del préstamo? criterio heurístico)
-            # O si el borrower puede pagarlo de su equity?
-            # Asumamos que el tax se paga CASH from Borrower.
-            
-            # Si el tax es muy alto, abortamos esta transacción (buscamos otro Partner menos sistémico).
-            if real_tax > amount * 0.05: # Si el impuesto es > 5% del principal, es muy caro.
-                continue
-            
-            # Ejecutar Transacción
             state.interbank_matrix[lender_idx, borrower_idx] += amount
             state.bank_cash[lender_idx] -= amount
-            state.bank_cash[borrower_idx] += amount # Recibe préstamo
+            state.bank_cash[borrower_idx] += amount
             
-            # Pagar Tax (Sale del sistema)
-            if state.bank_cash[borrower_idx] >= real_tax:
-                state.bank_cash[borrower_idx] -= real_tax
-                taxes_collected += real_tax
+            # Pagar Tax
+            if state.bank_cash[borrower_idx] >= tax:
+                state.bank_cash[borrower_idx] -= tax
+                taxes_collected += tax
             else:
-                # No puede pagar el tax, revertimos transacción (no ocurre)
+                # Si no puede pagar tax, revertimos (o paga parcial y quiebra después)
+                # Asumimos reversión
                 state.interbank_matrix[lender_idx, borrower_idx] -= amount
                 state.bank_cash[lender_idx] += amount
                 state.bank_cash[borrower_idx] -= amount
                 continue
-                
-            # Actualizar Gaps locales para loop
-            needed -= amount
+            
+            # Actualizar Estado Local
             liquidity_gap[borrower_idx] -= amount
             liquidity_gap[lender_idx] += amount
             
-            # Actualizar SR base para siguiente transacción
-            # El sistema ha cambiado, recalculamos SR para el siguiente par.
-            # (Podríamos usar new_sr si ya se calculó en SRT mode, pero por seguridad recalculamos
-            # o inicializamos new_sr antes).
+            # Actualizar SR Global (El sistema cambió, el próximo borrower ve la nueva red)
             current_sr = calculate_debtrank(state.interbank_matrix, state.bank_equity)
             
-            if needed < 1e-2: break 
-            
     state.collected_tax = taxes_collected
-    state.total_systemic_risk = current_sr # Final SR
+    state.total_systemic_risk = current_sr
+    
+    # Ejecutar Contagio Interbancario (Si el tax o el trading causaron quiebras marginales)
+    state = run_interbank_contagion(state)
+    
     return state
 
 def step7_evolution(state):
