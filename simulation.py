@@ -260,138 +260,115 @@ class CRISIS_Model:
         # --- PART B: INTERBANK MARKET & SRT ---
         
         # 1. Identify Liquidity Gaps
-        # Bank Liquidity
         bank_liquidity = self.banks_state[:, self.IDX_BANK_LIQUIDITY]
-        
-        # Gap = Needs - Current Cash
         gaps = bank_inflows_demand - bank_liquidity
         
-        deficit_mask = gaps > 0
-        surplus_mask = gaps < 0 # (Means -Gap is surplus)
-        
-        deficit_ids = np.where(deficit_mask)[0]
-        surplus_ids = np.where(surplus_mask)[0]
+        deficit_ids = np.where(gaps > 0)[0]
+        surplus_ids = np.where(gaps < 0)[0]
         
         if len(deficit_ids) > 0 and len(surplus_ids) > 0:
             
-            # Prepare Batch for DebtRank
-            # We want to test matching every Deficit Bank (D) with every Surplus Bank (S).
-            # But realistically, D needs to find *one* lender.
-            # We need to compute SRT for all D-S pairs.
-            
-            # Hypothetical Pairs
-            # Create grids
-            # D_grid, S_grid = np.meshgrid(deficit_ids, surplus_ids, indexing='ij')
-            # Pairs: (D, S). Total K = N_Def * N_Sur.
-            
-            pairs = []
+            # Generate all pairs (Deficit, Surplus)
+            pairs_d, pairs_s = [], []
             for d in deficit_ids:
                 for s in surplus_ids:
-                    pairs.append((d, s))
+                    pairs_d.append(d)
+                    pairs_s.append(s)
             
-            K = len(pairs)
+            pairs_d = np.array(pairs_d)
+            pairs_s = np.array(pairs_s)
             
-            if K > 0:
-                # Construct L_batch
-                # Copy current L_bb K times.
-                # Shape (K, B, B)
-                L_batch = np.tile(self.L_bb, (K, 1, 1))
+            if len(pairs_d) > 0:
+                # Proposed Amounts: Min(Need, Available Surplus)
+                amounts = np.minimum(gaps[pairs_d], -gaps[pairs_s])
                 
-                # Apply hypothetical loans
-                # L[k, row=Borrower(d), col=Lender(s)] += Amount
-                # Amount? Usually the needed amount (gap[d]), capped by surplus[s].
-                amounts = np.zeros(K)
+                # Prepare args for compute_srt_tax
+                proposed_indices = np.column_stack((pairs_d, pairs_s))
                 
-                for k, (d, s) in enumerate(pairs):
-                    amount = min(gaps[d], -gaps[s]) # - because surplus is negative gap
-                    L_batch[k, d, s] += amount
-                    amounts[k] = amount
+                # Parameters for function
+                C = self.banks_state[:, self.IDX_BANK_EQUITY]
+                # v = Total Assets (Liquidity + BankLoans + FirmLoans)
+                # For now, approximate v as Equity or Assets?
+                # User prompt mentioned: "v: Economic Value (Total Assets/Liabilities)"
+                # Let's sum components we have.
+                # Assets = Liquidity + Loans to Firms (L_fb sum axis 1 implicitly?) + Loans to Banks.
+                # L_fb is (F,B) so LoansToFirms = Sum over F of L_fb[:, b].
+                loans_to_firms = np.sum(self.L_fb, axis=0) # (B,)
+                loans_to_banks = np.sum(self.L_bb, axis=1) # (B,) L_bb rows=borrower? No, rows=borrower means i owes j. 
+                # So Assets of j = sum_i L_ij. (Col sum).
+                # Wait. "Rows=Borrowers, Cols=Lenders."
+                # So L_ij is amount i owes j. j is the lender (Asset Holder).
+                # So Assets of Bank j = sum(L_ij over i).
+                interbank_assets = np.sum(self.L_bb, axis=0)
                 
-                # Equity for DR (Assumed constant for the moment of transaction? Or adjusted?)
-                # Use current equity
-                equity_vec = self.banks_state[:, self.IDX_BANK_EQUITY]
-                equity_batch = np.tile(equity_vec, (K, 1))
+                total_assets = bank_liquidity + loans_to_firms + interbank_assets
+                v = total_assets
                 
-                # --- CORE: VECTORIZED DEBTRANK ---
-                # Calculate DR for all hypothetical networks
-                # Returns (K, B)
-                batch_dr = fn.calculate_debtrank(L_batch, equity_batch)
+                # p_default: Simplified constant or function of Leverage
+                p_def = np.full(Params.B, 0.05) 
                 
-                # Compute Expected Systemic Loss (Systemic Risk)
-                # Need p_default. Let's assume uniform small p or leverage dependent.
-                p_def = np.full((K, Params.B), 0.05) # 5% default prob placeholder
-                
-                # Total System Equity as Value
-                V_total = np.sum(equity_vec)
-                
-                # EL_syst for each scenario k
-                # Shape (K,)
-                EL_syst = fn.compute_expected_systemic_loss(batch_dr, p_def, V_total)
-                
-                # Marginal Contribution (SRT)
-                # Delta = EL_syst(new) - EL_syst(current/old)
-                # Calc baseline DR
-                baseline_dr = fn.calculate_debtrank(self.L_bb, equity_vec)
-                base_EL = fn.compute_expected_systemic_loss(baseline_dr, p_def[0], V_total)
-                
-                marginal_risk = EL_syst - base_EL
-                marginal_risk = np.maximum(marginal_risk, 0)
-                
-                tax_costs = marginal_risk * Params.TAX_SRT_ZETA
+                # CALL THE NEW FUNCTION
+                taxes = fn.compute_srt_tax(
+                    L_current=self.L_bb,
+                    proposed_loans_indices=proposed_indices,
+                    proposed_amounts=amounts,
+                    C=C,
+                    v=v,
+                    p_default=p_def,
+                    zeta=Params.TAX_SRT_ZETA
+                )
                 
                 # Interest Costs
-                # Rate * Amount.
-                # Simple rate r_bar.
-                interest_costs = amounts * Params.r_bar
-                
-                total_costs = interest_costs + tax_costs
+                interest = amounts * Params.r_bar
+                total_costs = interest + taxes
                 
                 # --- MATCHING DECISION ---
-                # Simple Greedy Optimization:
-                # Sort pairs by lowest Total Cost per unit of loan? 
-                # Or for each D, find best S.
+                # For each Deficit bank d, find S that minimizes total_cost[pair]
+                # We need to reshape or iterate.
                 
-                # Reshape costs to (N_Def, N_Sur) to find best S for each D
-                cost_matrix = total_costs.reshape(len(deficit_ids), len(surplus_ids))
+                # Unique deficits
+                unique_d = np.unique(pairs_d)
                 
-                # Optimal S for each D
-                best_s_indices = np.argmin(cost_matrix, axis=1) # Indices into surplus_ids
-                
-                # Execute Transactions
-                # Note: This ignores competition (if multiple D want same S and S runs out).
-                # For Phase 3 demo, we execute simply.
-                
-                for i, d_idx in enumerate(deficit_ids):
-                    s_idx = surplus_ids[best_s_indices[i]]
+                for d in unique_d:
+                    # Indices in the pairs lists belonging to this d
+                    mask = (pairs_d == d)
+                    candidates_s = pairs_s[mask]
+                    candidates_costs = total_costs[mask]
+                    candidates_amounts = amounts[mask]
                     
-                    # Check if S still has funds? (Skipped for Vector demo simplicity)
+                    if len(candidates_s) == 0: continue
                     
-                    amount = min(gaps[d_idx], -gaps[s_idx])
+                    # Best match
+                    best_idx_local = np.argmin(candidates_costs)
+                    s_best = candidates_s[best_idx_local]
+                    amount_best = candidates_amounts[best_idx_local]
                     
-                    # Update Real L_bb
-                    self.L_bb[d_idx, s_idx] += amount
+                    # Execute Transaction (Simplified: One per Deficit bank)
+                    # Check consistency? (e.g. if S runs out of funds).
+                    # We skip strict double-counting check for this phase.
                     
-                    # Accounting
-                    # D gets Cash (+), S loses Cash (-)
-                    self.banks_state[d_idx, self.IDX_BANK_LIQUIDITY] += amount
-                    self.banks_state[s_idx, self.IDX_BANK_LIQUIDITY] -= amount
+                    # Update L_bb
+                    self.L_bb[d, s_best] += amount_best
                     
-                    # Record Tax Paid? (Reduce Equity of borrower appropriately?)
-                    # self.banks_state[d_idx, self.IDX_BANK_EQUITY] -= tax[pair]...
-        
+                    # Transfers
+                    self.banks_state[d, self.IDX_BANK_LIQUIDITY] += amount_best
+                    self.banks_state[s_best, self.IDX_BANK_LIQUIDITY] -= amount_best
+                    
+                    # Tax Payment? 
+                    # If tax > 0, does the bank pay it to external sink?
+                    # "Update Bank Equity (Deduct Tax)"
+                    tax_val = taxes[mask][best_idx_local]
+                    if tax_val > 0:
+                        self.banks_state[d, self.IDX_BANK_EQUITY] -= tax_val
+
         # Finally, update Firm-Bank L_fb based on credit granted
-        # For simplicity, assuming all credit demands were met by the banks (via interbank or own funds)
-        # We assume banks deliver the cash to firms.
         if hasattr(self, 'current_credit_demand'):
-            # Update L_fb manually or via loop
-            for f in range(Params.F):
+             for f in range(Params.F):
                 amt = self.current_credit_demand[f]
                 if amt > 0:
                     bank = chosen_bank_ids[f]
                     self.L_fb[f, bank] += amt
-                    # Firm gets cash
                     self.firms_state[f, self.IDX_FIRM_LIQUIDITY] += amt
-                    # Bank loses cash (sent to firm)
                     self.banks_state[bank, self.IDX_BANK_LIQUIDITY] -= amt
 
     def run_step(self):

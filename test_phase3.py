@@ -47,8 +47,9 @@ def test_phase3():
         [10, 0, 0]
     ], dtype=float)
     E_test = np.array([5, 5, 5], dtype=float)
+    v_test = np.array([100, 100, 100], dtype=float) # Total Assets
     
-    DR = fn.calculate_debtrank(L_test, E_test)
+    DR = fn.compute_debtrank(L_test, E_test, v_test)
     print(f"Triangle DebtRank: {DR}")
     # With L=10, E=5, Impact W=1. Chain reaction should yield High DR.
     assert np.all(DR > 0), "DebtRank should be positive for connected cyclic graph"
