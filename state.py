@@ -47,9 +47,18 @@ class EconomyState:
         # A[i, j] = Préstamo del Banco i al Banco j (Activo para i, Pasivo para j)
         self.interbank_matrix = np.zeros((N_BANKS, N_BANKS), dtype=np.float64)
         
-        # Matriz de Préstamos Bancos a Firmas (B x F)
-        # A[i, j] = Préstamo del Banco i a la Firma j
+        # Matriz de Préstamos Bancos a Firmas (B x F) Activos
         self.bank_firm_loans = np.zeros((N_BANKS, N_FIRMS), dtype=np.float64)
+        
+        # Tasas de interés actuales cobradas a cada firma (B x F)
+        # Se actualizan cuando se emite un nuevo préstamo.
+        self.loan_interest_rates = np.zeros((N_BANKS, N_FIRMS), dtype=np.float64)
+        
+        # --- Variables de Flujo Paso 2 (Mercado Crédito) ---
+        # Solicitudes de crédito aceptadas en este paso (para verificación)
+        self.new_loans_granted = np.zeros(N_FIRMS, dtype=np.float64)
+        # Banco prestamista escogido para el nuevo préstamo (-1 = ninguno)
+        self.firm_lender_choice = np.full(N_FIRMS, -1, dtype=np.int32)
         
         # --- Asignación de Propiedad (Ownership) ---
         # Los hogares son dueños de firmas y bancos. 
