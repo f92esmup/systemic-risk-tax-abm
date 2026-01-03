@@ -3,7 +3,7 @@
 
 # Dimensiones de la población
 N_BANCOS = 20           # Antes N_BANKS
-N_EMPRESAS = 300        # Antes N_FIRMS
+N_EMPRESAS = 100        # Antes N_FIRMS
 N_HOGARES = 1300        # Antes N_HOUSEHOLDS
 
 # Parámetros Económicos
@@ -40,5 +40,5 @@ TASA_ITF = 0.002                # FTT_RATE (ITF = Impuesto Transacción Financie
 
 # Configuración Inicial
 EFECTIVO_INICIAL_EMPRESA = 20.0     # INITIAL_FIRM_CASH
-PATRIMONIO_INICIAL_BANCO = 60.0   # INITIAL_BANK_EQUITY
+PATRIMONIO_INICIAL_BANCO = 120.0   # INITIAL_BANK_EQUITY
 EFECTIVO_INICIAL_HOGAR = 100.0      # INITIAL_HOUSEHOLD_CASH

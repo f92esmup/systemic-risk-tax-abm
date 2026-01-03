@@ -17,7 +17,9 @@ class EstadoEconomia:
         # Efectivo/Liquidez de las empresas
         self.efectivo_empresas = np.full(N_EMPRESAS, EFECTIVO_INICIAL_EMPRESA, dtype=np.float64)
         # Precio estimado por cada empresa P_i(t)
-        self.precios_empresas = np.ones(N_EMPRESAS, dtype=np.float64)
+        # Inicializamos en Costo Marginal (W/alpha) para equilibrio inicial
+        precio_equilibrio = TASA_SALARIAL / PRODUCTIVIDAD_LABORAL
+        self.precios_empresas = np.full(N_EMPRESAS, precio_equilibrio, dtype=np.float64)
         # Demanda esperada D_i(t)
         self.demanda_esperada_empresas = np.zeros(N_EMPRESAS, dtype=np.float64)
         # Stock de bienes producidos (Inventario)

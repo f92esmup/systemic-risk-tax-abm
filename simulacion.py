@@ -4,9 +4,10 @@ import pandas as pd
 import time
 from estado import EstadoEconomia
 from logica import (
-    paso1_planificacion_empresas, paso2_prestamos_bancarios, paso3_produccion, 
-    paso4_consumo, paso5_repago_empresas, paso6_mercado_interbancario, 
-    paso7_evolucion, ejecutar_contagio_interbancario
+    paso1_planificacion_empresas, paso3_produccion, 
+    paso4_consumo, paso5_repago_empresas, 
+    paso7_evolucion, ejecutar_contagio_interbancario,
+    paso2_y_mercado_interbancario_integrado
 )
 from parametros import *
 
@@ -37,9 +38,17 @@ class RecolectorDatos:
         #     nuevas_filas.append(f"{step},Banco,{b},Empresa,{e},{m:.2f},CREDITO")
             
         # Write to file periodically or every step
-        if nuevas_filas:
+        if len(nuevas_filas) > 0:
+            self.datos_buffer.extend(nuevas_filas)
+            
+        if len(self.datos_buffer) > 1000: # Buffer de escritura
+            self.flush()
+
+    def flush(self):
+        if self.datos_buffer:
             with open(self.nombre_archivo, "a") as f:
-                f.write("\n".join(nuevas_filas) + "\n")
+                f.write("\n".join(self.datos_buffer) + "\n")
+            self.datos_buffer = []
 
 class EjecutorSimulacion:
     def __init__(self, pasos=PASOS_SIMULACION):
@@ -73,8 +82,8 @@ class EjecutorSimulacion:
             # --- Paso 1: Planificación ---
             estado = paso1_planificacion_empresas(estado)
             
-            # --- Paso 2: Crédito ---
-            estado = paso2_prestamos_bancarios(estado)
+            # --- Paso 2 y 6 (Integrados): Crédito + Interbancario ---
+            estado = paso2_y_mercado_interbancario_integrado(estado, modo_impuesto=modo_impuesto)
             
             # --- Paso 3: Producción ---
             estado = paso3_produccion(estado)
@@ -85,19 +94,10 @@ class EjecutorSimulacion:
             # --- Paso 5: Repago y Quiebras Empresas ---
             estado = paso5_repago_empresas(estado)
             
-            # --- Paso 5b: Contagio Interbancario (Shock Externo Previo a Mercado) ---
-            estado, cascada_1 = ejecutar_contagio_interbancario(estado)
+            # --- Paso 5b: Contagio Interbancario (Shock Externo post-defaults) ---
+            estado, cascada_total_paso = ejecutar_contagio_interbancario(estado)
             
-            # --- Paso 6: Interbancario y Tax ---
-            # Ahora paso6 devuelve (estado, cascada_interna)
-            estado, cascada_2 = paso6_mercado_interbancario(estado, modo_impuesto=modo_impuesto)
-            
-            # --- catch-up final if needed (paso6 already did it, but let's be safe or skip)
-            # Como paso6 ya ejecutó contagio, no deberíamos necesitar llamarlo de nuevo inmediatamente
-            # salvo que queramos ver si el tax causó algo extra (pero paso6 lo incluye).
-            # Eliminamos la llamada redundante para evitar doble conteo o confusión.
-            
-            cascada_total_paso = cascada_1 + cascada_2
+            # NOTA: Paso 6 original eliminado, integrado en Paso 2.
             
             # --- Paso 7: Evolución ---
             estado = paso7_evolucion(estado)
@@ -136,9 +136,12 @@ class EjecutorSimulacion:
         # No podemos acceder facilmente, usamos proxy de NetworkX en visualizacion o guardamos raw data.
         # Mejor: Guardamos estado.matriz_interbancaria y estado.patrimonio_bancos en numpy.
         
+        # Guardar Snapshot Final en formato NPZ
         np.savez(f"snapshot_final_{nombre_safe}.npz", 
                  matriz_interbancaria=estado.matriz_interbancaria, 
                  patrimonio_bancos=estado.patrimonio_bancos)
+
+        recolector.flush() # Escribir lo que quede en buffer
 
         df = pd.DataFrame(historial)
         self.resultados[nombre_escenario] = df

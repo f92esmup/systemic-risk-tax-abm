@@ -97,6 +97,232 @@ def paso2_prestamos_bancarios(estado):
 def valor_stock_empresa(estado):
     return estado.stock_empresas * estado.precios_empresas
 
+def ejecutar_mercado_interbancario_demanda(estado, deficit_liquidez, modo_impuesto='IRS'):
+    """
+    Ejecuta el mercado interbancario basado en la demanda de liquidez inmediata (déficit).
+    Objetivo: Cubrir 'deficit_liquidez' para poder prestar a empresas.
+    """
+    indices_deficitarios = np.where(deficit_liquidez > 0)[0]
+    if len(indices_deficitarios) == 0:
+        return estado
+
+    # Identificar Superavitarios (Bancos con efectivo disponible)
+    # Nota: Usamos todo el efectivo disponible porque aun no se ha prestado a empresas.
+    indices_superavitarios = np.where(estado.efectivo_bancos > 1e-4)[0]
+    
+    if len(indices_superavitarios) == 0:
+        return estado # Nadie tiene dinero
+        
+    # Mezclar orden para evitar sesgos
+    np.random.shuffle(indices_deficitarios)
+    
+    # Calcular DebtRank actual para comparaciones de impuestos
+    rs_actual = calcular_debtrank(estado.matriz_interbancaria, estado.patrimonio_bancos)
+    estado.riesgo_sistemico_total = rs_actual
+    total_patrimonio_sistema = max(np.sum(estado.patrimonio_bancos), 1.0)
+    
+    N_COTIZACIONES = 5
+    impuestos_recaudados = 0.0
+    
+    for idx_prestatario in indices_deficitarios:
+        monto_necesario = deficit_liquidez[idx_prestatario]
+        if monto_necesario < 1e-4: continue
+        
+        # Filtrar prestamistas con dinero
+        prestamistas_validos = [p for p in indices_superavitarios if estado.efectivo_bancos[p] > 1e-4 and p != idx_prestatario]
+        if not prestamistas_validos: break
+        
+        # Seleccionar candidatos (Cotizaciones)
+        candidatos = np.random.choice(prestamistas_validos, min(len(prestamistas_validos), N_COTIZACIONES), replace=False)
+        
+        mejor_prestamista = -1
+        mejor_tasa_efectiva = float('inf')
+        mejor_dat = None # (monto, impuesto)
+        
+        # Calcular Probabilidad de Default del Prestatario (Aprox. por apalancamiento/fragilidad)
+        # Leverage = Pasivos/Patrimonio? O Activos/Patrimonio? 
+        # Usaremos Activos Totales / Patrimonio como proxy de riesgo
+        activos = np.sum(estado.prestamos_banco_empresa[idx_prestatario]) + np.sum(estado.matriz_interbancaria[idx_prestatario])
+        patrimonio = max(estado.patrimonio_bancos[idx_prestatario], 0.1)
+        leverage = activos / patrimonio
+        prob_default_prestatario = np.tanh(leverage) # 0 a 1 aprox
+        
+        for idx_prestamista in candidatos:
+            disponible = estado.efectivo_bancos[idx_prestamista]
+            monto = min(monto_necesario, disponible)
+            
+            # --- CÁLCULO DE IMPUESTO ---
+            impuesto = 0.0
+            if modo_impuesto == 'IRS':
+                # Simular impacto en DebtRank
+                matriz_sim = estado.matriz_interbancaria.copy()
+                matriz_sim[idx_prestamista, idx_prestatario] += monto
+                nuevo_rs = calcular_debtrank(matriz_sim, estado.patrimonio_bancos)
+                
+                delta_rs = max(0.0, nuevo_rs - rs_actual)
+                delta_norm = delta_rs / total_patrimonio_sistema
+                
+                # Formula Paper: Tax = Monto * Sensibilidad * Delta_Impacto * Prob_Default
+                impuesto = monto * SENSIBILIDAD_IRS * delta_norm * prob_default_prestatario
+                
+            elif modo_impuesto == 'ITF':
+                impuesto = monto * TASA_ITF
+            
+            # Costo para el prestatario
+            costo_interes = monto * TASA_INTERBANCARIA
+            costo_total = costo_interes + impuesto
+            tasa_efectiva = costo_total / monto if monto > 0 else float('inf')
+            
+            if tasa_efectiva < mejor_tasa_efectiva:
+                mejor_tasa_efectiva = tasa_efectiva
+                mejor_prestamista = idx_prestamista
+                mejor_dat = (monto, impuesto)
+        
+        # Ejecutar Transacción si es razonable
+        if mejor_prestamista != -1 and mejor_tasa_efectiva < 0.50: # Cap alto pero razonable
+            p_lender = mejor_prestamista
+            monto, impuesto = mejor_dat
+            
+            # Verificar si prestatario puede pagar el impuesto upfront?
+            # En realidad, el impuesto suele pagarlo el que inicia o ambos. 
+            # Asumimos que sale del efectivo del prestatario (que recibe el prestamo).
+            # Pero si no tiene cash (por eso pide), el impuesto reduce el neto recibido?
+            # O el prestamista paga y lo cobra?
+            # Paper: "The tax is levied on the transaction".
+            # Simplificación: El prestatario paga el impuesto con parte del dinero recibido.
+            
+            estado.matriz_interbancaria[p_lender, idx_prestatario] += monto
+            estado.efectivo_bancos[p_lender] -= monto
+            
+            # El prestatario recibe 'monto'
+            estado.efectivo_bancos[idx_prestatario] += monto
+            
+            # Pagar impuesto
+            if impuesto > 0:
+                if estado.efectivo_bancos[idx_prestatario] >= impuesto:
+                    estado.efectivo_bancos[idx_prestatario] -= impuesto
+                    impuestos_recaudados += impuesto
+                    estado.fondo_rescate += impuesto
+                else:
+                    # Si el impuesto consume todo el préstamo, revertimos (no sirve pedir)
+                    # O cobramos lo que se pueda. Revertir es mas seguro para la logica.
+                    estado.matriz_interbancaria[p_lender, idx_prestatario] -= monto
+                    estado.efectivo_bancos[p_lender] += monto
+                    estado.efectivo_bancos[idx_prestatario] -= monto
+                    continue
+            
+            # Actualizar deficit restante
+            deficit_liquidez[idx_prestatario] -= monto
+            
+            # Actualizar RS global
+            rs_actual = calcular_debtrank(estado.matriz_interbancaria, estado.patrimonio_bancos)
+
+    estado.impuesto_recaudado += impuestos_recaudados # Acumular si hay multiples rondas
+    estado.riesgo_sistemico_total = rs_actual
+    return estado
+
+def paso2_y_mercado_interbancario_integrado(estado, modo_impuesto='IRS'):
+    """
+    Fusión de Paso 2 y Mercado Interbancario.
+    Secuencia:
+    1. Empresas solicitan crédito.
+    2. Bancos calculan brecha (Demanda - Efectivo).
+    3. Bancos piden en Interbancario para cubrir brecha.
+    4. Bancos otorgan préstamos a empresas.
+    """
+    
+    # --- 1. SOLICITUD DE CRÉDITO Y COTIZACIONES ---
+    indices_empresas_necesitadas = np.where(estado.demanda_credito_empresas > 1e-5)[0]
+    if len(indices_empresas_necesitadas) == 0:
+        return estado
+
+    # Selección de bancos (Copy-paste lógica de selección de paso2 original)
+    mascara_cotizaciones = np.zeros((N_EMPRESAS, N_BANCOS), dtype=bool)
+    matriz_aleatoria = np.random.rand(len(indices_empresas_necesitadas), N_BANCOS)
+    top_n_bancos = np.argsort(matriz_aleatoria, axis=1)[:, :N_SOLICITUDES_CREDITO]
+    indices_fila = indices_empresas_necesitadas[:, np.newaxis]
+    mascara_cotizaciones[indices_fila, top_n_bancos] = True
+    
+    deuda_empresa = np.sum(estado.prestamos_banco_empresa, axis=0)
+    recursos_empresa = estado.efectivo_empresas + valor_stock_empresa(estado)
+    apalancamiento_empresa = np.divide(deuda_empresa, np.maximum(recursos_empresa, 1.0))
+    
+    factor_riesgo_empresa = np.tanh(apalancamiento_empresa)
+    especificidad_banco = np.random.uniform(0, 1, size=N_BANCOS)
+    matriz_riesgo = np.outer(especificidad_banco, factor_riesgo_empresa)
+    tasas_ofrecidas = TASA_REFINANCIACION * (1.0 + matriz_riesgo)
+    tasas_finales = np.where(mascara_cotizaciones.T, tasas_ofrecidas, np.inf)
+    
+    indices_mejor_banco = np.argmin(tasas_finales, axis=0) # (F,)
+    tasas_mejor_banco = np.min(tasas_finales, axis=0)      # (F,)
+    
+    # --- 2. CALCULAR DEMANDA AGREGADA POR BANCO ---
+    demanda_por_banco = np.zeros(N_BANCOS)
+    
+    # Mapear demanda de empresa a su banco elegido
+    # Solo consideramos demandas válidas (tasa < MAX)
+    demanda_valida_mask = tasas_mejor_banco < TASA_INTERES_MAXIMA
+    
+    # Iterar para sumar (podria vectorizarse pero loop es claro)
+    empresas_potenciales = [] # Lista de tuplas (empresa, banco, monto, tasa)
+    
+    for f_idx in indices_empresas_necesitadas:
+        if not demanda_valida_mask[f_idx]:
+            # Demanda contraída
+            demanda_red = estado.demanda_credito_empresas[f_idx] * CONTRACCION_DEMANDA_CREDITO
+            # Aceptamos tasa alta? No, el paper dice que si > MAX, reducen demanda. 
+            # Asumiremos que si reduce demanda, quizas acepta la tasa o busca otro banco?
+            # Simplificación: Si tasa > MAX, reduce demanda y NO toma préstamo (o toma parcial?)
+            # El codigo original decía: if tasa > MAX: demanda *= CONTRACTION.
+            # Y luego chequeaba if banco tiene cash.
+            # Asumimos que la empresa SÍ quiere el prestamo reducido.
+            
+            # Pero la tasa sigue siendo la ofrecida?
+            pass 
+        
+        banco = indices_mejor_banco[f_idx]
+        tasa = tasas_mejor_banco[f_idx]
+        demanda = estado.demanda_credito_empresas[f_idx]
+        
+        if tasa > TASA_INTERES_MAXIMA:
+             demanda *= CONTRACCION_DEMANDA_CREDITO
+        
+        demanda_por_banco[banco] += demanda
+        empresas_potenciales.append((f_idx, banco, demanda, tasa))
+        
+    # --- 3. MERCADO INTERBANCARIO (Cubrir Déficits) ---
+    legislacion_liquidez = demanda_por_banco # Necesitamos cubrir la demanda
+    efectivo_actual = estado.efectivo_bancos.copy()
+    
+    déficit = np.maximum(0.0, legislacion_liquidez - efectivo_actual)
+    
+    # Llamar al interbancario para cubrir 'déficit'
+    estado = ejecutar_mercado_interbancario_demanda(estado, déficit, modo_impuesto)
+    
+    # --- 4. OTORGAMIENTO DE CRÉDITO (Con nueva liquidez) ---
+    for f_idx, banco, demanda, tasa in empresas_potenciales:
+        if estado.efectivo_bancos[banco] >= demanda:
+            estado.efectivo_bancos[banco] -= demanda
+            estado.efectivo_empresas[f_idx] += demanda
+            estado.prestamos_banco_empresa[banco, f_idx] += demanda
+            estado.tasas_interes_prestamos[banco, f_idx] = tasa
+            
+            estado.nuevos_prestamos_otorgados[f_idx] = demanda
+            estado.eleccion_prestamista_empresa[f_idx] = banco
+        else:
+            # Racionamiento / Credit Crunch Parcial
+            monto_posible = estado.efectivo_bancos[banco]
+            if monto_posible > 1e-4:
+                estado.efectivo_bancos[banco] -= monto_posible
+                estado.efectivo_empresas[f_idx] += monto_posible
+                estado.prestamos_banco_empresa[banco, f_idx] += monto_posible
+                estado.tasas_interes_prestamos[banco, f_idx] = tasa
+                
+                estado.nuevos_prestamos_otorgados[f_idx] = monto_posible
+                estado.eleccion_prestamista_empresa[f_idx] = banco
+
+    return estado
+
 def paso3_produccion(estado):
     """
     Paso 3: Mercado Laboral y Producción.
@@ -291,11 +517,11 @@ def calcular_debtrank(matriz_interbancaria, patrimonio_bancos):
         h = np.zeros(N_BANCOS)
         h[k] = 1.0
         
-        for _ in range(5):
+        while True:
             estres_entrante = matriz_impacto @ h
             h_siguiente = np.minimum(1.0, h + estres_entrante)
             
-            if np.allclose(h, h_siguiente):
+            if np.allclose(h, h_siguiente, atol=1e-5):
                 break
             h = h_siguiente
             
