@@ -526,20 +526,10 @@ def calculate_debtrank(interbank_matrix, bank_equity):
         
     return total_sr
 
-def step6_interbank_market(state):
+def step6_interbank_market(state, tax_mode='SRT'):
     """
-    Paso 6: Mercado Interbancario con Impuesto de Riesgo Sistémico (SRT).
-    
-    Lógica:
-    1. Identificar déficit/superávit de liquidez.
-       Target = BUFFER_RATIO * Total_Assets.
-    2. Bancos deficitarios intentan pedir prestado.
-    3. Antes de aceptar, calculamos SR_pre y SR_post.
-    4. Tax = SRT_SENSITIVITY * max(0, SR_post - SR_pre).
-    5. Si (Tasa + Tax) aceptable, se hace el préstamo.
-       El Tax se deduce del cash del prestatario (o prestamista? Paper: "Transaction Tax").
-       Asumimos que lo paga quien inicia la transacción (borrower) o split. 
-       Lo paga el Borrower para desincentivarlo a conectarse con nodos sistémicos.
+    Paso 6: Mercado Interbancario con Selección de Impuesto.
+    Modes: 'NONE', 'FTT', 'SRT'
     """
     
     # 1. Calcular Liquidez Objetivo
@@ -583,42 +573,32 @@ def step6_interbank_market(state):
             
             amount = min(needed, surplus)
             
-            # --- SIMULACIÓN DE RIESGO ---
-            # Simular préstamo: Lender presta a Borrower
-            # Activo Lender aumenta (Loan_LB), Activo Borrower (Cash) aumenta, Pasivo Borrower (Debt) aumenta.
-            # Matriz[L, B] += Amount.
-            
-            # Crear copia de matriz para simular
-            sim_matrix = state.interbank_matrix.copy()
-            sim_matrix[lender_idx, borrower_idx] += amount
-            
-            # Calcular Nuevo SR
-            new_sr = calculate_debtrank(sim_matrix, state.bank_equity)
-            delta_sr = max(0.0, new_sr - current_sr)
-            
             # --- CÁLCULO DE IMPUESTO ---
-            tax_amount = amount * SRT_SENSITIVITY * delta_sr
-            # Convertimos delta_sr que es absoluto (Equity Value) a relativo? 
-            # No, la fórmula del paper (Ec 3) Tax = zeta * Delta_SR. 
-            # Si Zeta es alto y Delta_SR es en unidades monetarias, el tax puede ser enorme.
-            # Ajuste: Delta_SR suele normalizarse o zeta ser muy pequeño.
-            # En parámetros pusimos ZETA=50, pero DR es en Dinero.
-            # Revisemos paper: "expected systemic loss". Es dinero.
-            # Si Delta SR = 1000 (un banco entero extra en riesgo), Tax = 50 * 1000 = 50k. ¡Enorme!
-            # El paper dice zeta = 1 (Page 5). "Tax rate is proportional to marginal increase".
-            # Probablemente Delta_SR se mide como fracción del total system size o similar.
-            # O el tax rate es per dollar transaction?
-            # Ec 4: Transaction Tax = Amount * Tax_Rate(Amount)? No.
-            # Dice "Payment of tax... proportional to increase in SR".
-            # Asumiremos ZETA pequeño en params o que SR está normalizado.
-            # Miremos calculate_debtrank output: Suma de Equity losses. Es Dinero.
-            # Ajustaremos tax a algo razonable: Zeta * (Delta_SR / Total_Equity_Sistema).
+            tax_amount = 0.0
             
-            total_system_equity = np.sum(state.bank_equity)
-            normalized_delta_sr = delta_sr / max(total_system_equity, 1.0)
+            # Variables de riesgo
+            delta_sr = 0.0
             
-            # Ajuste de sensibilidad del tax (heurístico para que tenga impacto pero no mate el mercado)
-            real_tax = amount * SRT_SENSITIVITY * normalized_delta_sr
+            if tax_mode == 'SRT':
+                # Simular Impacto Sistémico
+                sim_matrix = state.interbank_matrix.copy()
+                sim_matrix[lender_idx, borrower_idx] += amount
+                new_sr = calculate_debtrank(sim_matrix, state.bank_equity)
+                delta_sr = max(0.0, new_sr - current_sr)
+                
+                total_system_equity = np.sum(state.bank_equity)
+                normalized_delta_sr = delta_sr / max(total_system_equity, 1.0)
+                
+                tax_amount = amount * SRT_SENSITIVITY * normalized_delta_sr
+                
+            elif tax_mode == 'FTT':
+                # Tobin Tax flat rate
+                tax_amount = amount * FTT_RATE
+                
+            elif tax_mode == 'NONE':
+                tax_amount = 0.0
+            
+            real_tax = tax_amount
             
             # --- DECISIÓN ---
             # El borrower acepta si (Interbank_Rate * Amount + Tax) < Costo Alternativo?
@@ -656,9 +636,11 @@ def step6_interbank_market(state):
             liquidity_gap[borrower_idx] -= amount
             liquidity_gap[lender_idx] += amount
             
-            # Actualizar SR base para siguiente transacción implícitamente?
-            # Sí, el sistema cambió. El próximo préstamo se evalúa sobre el nuevo estado.
-            current_sr = new_sr
+            # Actualizar SR base para siguiente transacción
+            # El sistema ha cambiado, recalculamos SR para el siguiente par.
+            # (Podríamos usar new_sr si ya se calculó en SRT mode, pero por seguridad recalculamos
+            # o inicializamos new_sr antes).
+            current_sr = calculate_debtrank(state.interbank_matrix, state.bank_equity)
             
             if needed < 1e-2: break 
             

@@ -34,9 +34,14 @@ INTERBANK_RATE = 0.005  # Tasa interbancaria base (muy baja, overnight)
 ADAPTATION_SPEED = 0.2  # lambda (Ajuste de expectativas de demanda)
 PRICE_ADJUSTMENT_RATE = 0.02 # delta (Ajuste de precios ante desequilibrios)
 
+# Parámetros Simulación
+SIMULATION_STEPS = 20   # T (Duración de la simulación) - Aumentado para ver evolución
+FTT_RATE = 0.001        # Tasa FTT (0.1% por transacción interbancaria)
+
+
 
 
 # Configuración Inicial
-INITIAL_FIRM_CASH = 1000.0
+INITIAL_FIRM_CASH = 20.0    # Reducido de 1000 para forzar crédito (Wage Bill aprox 100)
 INITIAL_BANK_EQUITY = 2000.0
 INITIAL_HOUSEHOLD_CASH = 100.0

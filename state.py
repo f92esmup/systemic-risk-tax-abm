@@ -10,8 +10,8 @@ class EconomyState:
         # --- Sector Bancario (Dimension B) ---
         # Capital/Patrimonio de los bancos (Equity)
         self.bank_equity = np.full(N_BANKS, INITIAL_BANK_EQUITY, dtype=np.float64)
-        # Liquidez disponible (Cash)
-        self.bank_cash = np.zeros(N_BANKS, dtype=np.float64)
+        # Liquidez disponible (Cash) - Inicialmente es todo el Equity
+        self.bank_cash = self.bank_equity.copy()
         
         # --- Sector Productivo (Dimension F) ---
         # Efectivo/Liquidez de las firmas
