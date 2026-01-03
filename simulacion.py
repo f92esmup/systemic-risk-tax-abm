@@ -146,7 +146,7 @@ if __name__ == "__main__":
     sim = EjecutorSimulacion(pasos=PASOS_SIMULACION)
     
     # 1. Referencia (Sin Impuesto)
-    # sim.ejecutar_escenario("Referencia (Sin Impuesto)", modo_impuesto='NINGUNO')
+    sim.ejecutar_escenario("Referencia (Sin Impuesto)", modo_impuesto='NINGUNO')
     
     # 2. ITF (Impuesto Transacción Financiera)
     # sim.ejecutar_escenario("ITF (Tasa Tobin)", modo_impuesto='ITF')
