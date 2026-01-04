@@ -81,40 +81,46 @@ def main():
     
     # --- PLOTTING ---
     print("Generating Plots...")
-    
-    # Figure 4a: Losses Distribution (Log Scale usually)
+    # Figure 4a: Losses Distribution (Log Scale)
+    # El uso de escala logarítmica permite visualizar las "fat tails" (colas pesadas), 
+    # fundamentales para analizar eventos de riesgo sistémico extremo.
     plt.figure(figsize=(10, 6))
     sns.kdeplot(data_base['losses'], label='No Tax', fill=True, log_scale=(True, False))
     sns.kdeplot(data_srt['losses'], label='SRT', fill=True, log_scale=(True, False))
-    plt.title('Distribution of Financial Losses (Log-X)')
-    plt.xlabel('Loss Size')
+    sns.kdeplot(data_tobin['losses'], label='Tobin (0.2%)', fill=True, log_scale=(True, False), linestyle='--')
+    plt.title('Distribución de Pérdidas Financieras (Escala Log-X)')
+    plt.xlabel('Tamaño de la Pérdida (Capital Destruido)')
     plt.legend()
     plt.savefig('fig_losses.png')
     plt.close()
     
     # Figure 4b: Cascade Sizes
+    # Comparamos la frecuencia de defaults simultáneos. Un impuesto eficiente debería
+    # reducir la probabilidad de cascadas que involucren una gran fracción del sistema (B).
     plt.figure(figsize=(10, 6))
-    # Discrete histogram
-    plt.hist(data_base['cascades'], alpha=0.5, label='No Tax', bins=range(1, Params.B + 2), density=True)
-    plt.hist(data_srt['cascades'], alpha=0.5, label='SRT', bins=range(1, Params.B + 2), density=True)
-    plt.title('Distribution of Cascade Sizes (Bank Defaults)')
-    plt.xlabel('Number of Banks Defaulting')
-    plt.ylabel('Frequency')
+    bins = range(1, Params.B + 2)
+    plt.hist(data_base['cascades'], alpha=0.3, label='No Tax', bins=bins, density=True)
+    plt.hist(data_srt['cascades'], alpha=0.3, label='SRT', bins=bins, density=True)
+    plt.hist(data_tobin['cascades'], alpha=0.3, label='Tobin (0.2%)', bins=bins, density=True, histtype='step', linewidth=2)
+    plt.title('Distribución de Tamaños de Cascada (Defaults)')
+    plt.xlabel('Número de Bancos en Default')
+    plt.ylabel('Densidad de Frecuencia')
     plt.legend()
     plt.savefig('fig_cascades.png')
     plt.close()
     
     # Figure 4c: Volume (Transaction Volume)
+    # Analizamos la eficiencia del mercado. El SRT busca mitigar el riesgo sin 
+    # contraer excesivamente la liquidez, a diferencia de impuestos transaccionales ciegos.
     plt.figure(figsize=(10, 6))
     sns.kdeplot(data_base['volumes'], label='No Tax', fill=True)
     sns.kdeplot(data_srt['volumes'], label='SRT', fill=True)
     sns.kdeplot(data_tobin['volumes'], label='Tobin (0.2%)', fill=True, linestyle='--')
-    plt.title('Interbank Transaction Volume')
-    plt.xlabel('Volume')
+    plt.title('Volumen de Transacciones Interbancarias')
+    plt.xlabel('Volumen Agregado')
     plt.legend()
     plt.savefig('fig_volume.png')
     plt.close()
-    
     # Summary Statistics
     print("\n--- RESULTS SUMMARY ---")
     print(f"Avg Loss (No Tax): {np.mean(data_base['losses']) if len(data_base['losses'])>0 else 0:.2f}")
