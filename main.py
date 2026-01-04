@@ -64,7 +64,7 @@ def main():
     # Configuration matches Paper (roughly)
     # T=500, Runs=50 (Paper uses more, but we want speed for demo)
     # But for prompt compliance, I will try n_runs=15 to balance speed/results
-    N_RUNS = 10000 
+    N_RUNS = 200 
     STEPS = 500 # Paper uses 500-1000. 200 should be enough to see crises.
     
     # 1. Run Baseline (No Tax)
