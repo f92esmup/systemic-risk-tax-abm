@@ -19,9 +19,17 @@ def run_experiment(tax_mode='none', tax_param=0.0, n_runs=10, steps=200):
     all_losses = []
     all_cascade_sizes = []
     all_volumes = []
-    
+
     # Run loop
     for r in tqdm(range(n_runs), desc=f"{tax_mode.upper()} Runs"):
+        # Unique run_id for file naming needs to include mode to avoid collisions if we run modes sequentially
+        # OR we just rely on r and separate folders?
+        # User prompt said "run_00042.npz" in "output_data".
+        # If we run 3 experiments (None, SRT, Tobin) we might overwrite run_00000.
+        # Let's add a prefix or separate folders.
+        # For strict compliance with prompt "flush_data(run_id, output_folder)":
+        # We will use "output_data/{tax_mode}" to keep them clean.
+        
         model = CRISIS_Model(seed=1000 + r, tax_mode=tax_mode, tax_param=tax_param)
         
         for t in range(steps):
@@ -38,6 +46,13 @@ def run_experiment(tax_mode='none', tax_param=0.0, n_runs=10, steps=200):
             
             # 3. Volume
             all_volumes.append(model.current_step_volume)
+        
+        # --- FLUSH DATA TO DISK ---
+        # Save run data
+        # We use a global counter or just 'r'. But 'r' resets for each mode.
+        # Let's use a unique name or careful folder management.
+        output_subfolder = f"output_data/{tax_mode}"
+        model.save_run_to_disk(run_id=r, folder=output_subfolder)
             
     return {
         'losses': np.array(all_losses),

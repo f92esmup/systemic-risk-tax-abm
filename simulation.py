@@ -116,16 +116,69 @@ class CRISIS_Model:
         # --- 4. History / Traceability ---
         # Lists to store copies of adjacency matrices at each step.
         # Using lists is efficient for appending; convert to array for analysis later if needed.
-        self.history_L_bb = []
-        self.history_L_fb = []
+        # --- 4. History / Traceability ---
+        # "Flush-to-Disk" Architecture
+        # We buffer only the current run's steps in RAM.
+        # Format: Dictionary of lists.
+        self.step_buffer = {
+            'L_bb': [],
+            'L_fb': [],
+            'hh_bank_idx': [],
+            'hh_employer_idx': []
+        }
 
         # Record initial state
         self.record_history()
 
     def record_history(self):
-        """Append current topology specific copies to history."""
-        self.history_L_bb.append(self.L_bb.copy())
-        self.history_L_fb.append(self.L_fb.copy())
+        """Append current topology snapshots to step_buffer."""
+        # 1. Interbank Matrix (Float32 for space)
+        self.step_buffer['L_bb'].append(self.L_bb.astype(np.float32))
+        
+        # 2. Credit Matrix (Firms-Banks) (Float32)
+        # Note: L_fb is (F, B). 
+        self.step_buffer['L_fb'].append(self.L_fb.astype(np.float32))
+        
+        # 3. Household-Bank Relationship (Int16)
+        # "Who deposits where" - Shape (H,)
+        self.step_buffer['hh_bank_idx'].append(self.hh_bank_idx.astype(np.int16))
+        
+        # 4. Household-Employment Relationship (Int16)
+        # "Who works where" - Shape (H,)
+        self.step_buffer['hh_employer_idx'].append(self.hh_employer_idx.astype(np.int16))
+
+    def reset_history(self):
+        """Clear the step buffer to free RAM after flushing."""
+        for key in self.step_buffer:
+            self.step_buffer[key] = []
+
+    def save_run_to_disk(self, run_id, folder="output_data"):
+        """
+        Save the buffered run history to a compressed .npz file and clear RAM.
+        """
+        import os
+        os.makedirs(folder, exist_ok=True)
+        
+        # Stack lists into Arrays (Time Axis = 0)
+        # L_bb -> (T, B, B)
+        # L_fb -> (T, F, B)
+        # hh_indices -> (T, H)
+        data_dict = {}
+        for key, val_list in self.step_buffer.items():
+            if len(val_list) > 0:
+                data_dict[key] = np.stack(val_list)
+            else:
+                # Handle empty case if steps=0 (should not happen)
+                data_dict[key] = np.array([])
+        
+        # Filename: run_00042.npz
+        filename = f"{folder}/run_{run_id:05d}.npz"
+        
+        # Save Compressed
+        np.savez_compressed(filename, **data_dict)
+        
+        # Clear RAM immediately
+        self.reset_history()
 
     def step_firms_planning(self):
         """
