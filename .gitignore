@@ -2,3 +2,5 @@ __pycache__/
 *.csv
 *.png
 *.npz
+output_data/
+test_*.py
