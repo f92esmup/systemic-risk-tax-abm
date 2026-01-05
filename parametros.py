@@ -1,4 +1,4 @@
-class Params:
+class Parametros:
     """
     Parameters from Table I of Poledna & Thurner (2016)
     'Elimination of systemic risk in financial networks'
@@ -42,7 +42,7 @@ class Params:
     TAX_TOBIN_RATE = 0.002  # 0.2%
     TAX_SRT_ZETA = 0.02  # Sensitivity for SRT (Main text uses 0.02)
 
-    # --- Algorithm / Simulation parameters ---
+    # --- Algorithm / Simulation parametros ---
 
     # Price adjustment
     PRICE_ADJUSTMENT_SPEED = 0.05

@@ -2,8 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
-from simulation import CRISIS_Model
-from parameters import Params
+from simulacion import Modelo_CRISIS
+from parametros import Parametros
 import os
 
 # Configuración de Estilo
@@ -21,11 +21,11 @@ def run_batch(mode, param, n_runs=10, n_steps=200):
     os.makedirs(output_folder, exist_ok=True)
 
     for r in tqdm(range(n_runs), desc=f"Simulando {mode}"):
-        model = CRISIS_Model(seed=2000 + r, tax_mode=mode, tax_param=param)
+        model = Modelo_CRISIS(seed=2000 + r, tax_mode=mode, tax_param=param)
         
         run_volumes = []
         for t in range(n_steps):
-            model.run_step()
+            model.ejecutar_paso()
             
             # Recolectar métricas del paso
             if model.current_step_loss > 0:
@@ -38,7 +38,7 @@ def run_batch(mode, param, n_runs=10, n_steps=200):
         all_volumes.append(np.mean(run_volumes))
         
         # Guardar snapshot completo a disco
-        model.save_run_to_disk(run_id=r, folder=output_folder)
+        model.guardar_simulacion_disco(run_id=r, folder=output_folder)
 
     return {
         "losses": np.array(all_losses),
@@ -67,7 +67,7 @@ def main():
     axes[0].legend()
 
     # B. Cascadas
-    bins = np.arange(1, Params.B + 2)
+    bins = np.arange(1, Parametros.B + 2)
     axes[1].hist(data_none["cascades"], bins=bins, alpha=0.5, label="No Tax", color="red", density=True)
     axes[1].hist(data_srt["cascades"], bins=bins, alpha=0.5, label="SRT", color="green", density=True)
     axes[1].set_title("Tamaño de Cascadas (C)")

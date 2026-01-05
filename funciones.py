@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def compute_debtrank(L, C, v, initial_distress=None, steps=100):
+def calcular_debtrank(L, C, v, initial_distress=None, steps=100):
     """
     Calculate DebtRank for each node in a financial network.
     Supports both single matrix (B, B) and batch of matrices (K, B, B).
@@ -71,7 +71,7 @@ def compute_debtrank(L, C, v, initial_distress=None, steps=100):
         return R
 
 
-def compute_srt_tax(
+def calcular_impuesto_srt(
     L_current, proposed_loans_indices, proposed_amounts, C, v, p_default, zeta
 ):
     """
@@ -84,7 +84,7 @@ def compute_srt_tax(
     B = L_current.shape[0]
 
     # 1. Baseline Systemic Loss
-    R_base = compute_debtrank(L_current, C, v)
+    R_base = calcular_debtrank(L_current, C, v)
     V_total = np.sum(v)
     EL_base = np.sum(p_default * R_base) * V_total
 
@@ -96,7 +96,7 @@ def compute_srt_tax(
     L_batch[batch_indices, rows, cols] += proposed_amounts
 
     # 3. Compute DebtRank for Batch
-    R_batch = compute_debtrank(L_batch, C, v)  # (N_props, B)
+    R_batch = calcular_debtrank(L_batch, C, v)  # (N_props, B)
 
     # 4. Expected Loss for Batch
     EL_new = np.sum(p_default[np.newaxis, :] * R_batch, axis=1) * V_total
@@ -112,14 +112,14 @@ def compute_srt_tax(
 
 # --- APPENDIX A: INTEREST RATE MECHANISM ---
 
-def calculate_financial_fragility(leverage, k_mu=10.0):
+def calcular_fragilidad_financiera(leverage, k_mu=10.0):
     """
     Eq A1/A2 helper: mu(l) = tanh(k_mu * leverage)
     """
     return np.tanh(k_mu * leverage)
 
 
-def calculate_firm_rate(r_bar, chi, fragility_firm):
+def calcular_tasa_firma(r_bar, chi, fragility_firm):
     """
     Eq A1: r_if = r_bar * (1 + chi_i * mu(l_firm))
     
@@ -134,7 +134,7 @@ def calculate_firm_rate(r_bar, chi, fragility_firm):
     return r_bar * (1 + chi * fragility_firm)
 
 
-def calculate_interbank_rate(r_bar, psi, fragility_borrower):
+def calcular_tasa_interbancaria(r_bar, psi, fragility_borrower):
     """
     Eq A2: r_ij = r_bar * (1 + psi_i * mu(l_borrower))
     

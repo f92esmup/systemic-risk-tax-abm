@@ -2,8 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
 import os
-import functions as fn
-from parameters import Params
+import funciones as fn
+from parametros import Parametros
 
 def plot_network_topology(mode="none", run_id=0, step_t=-1):
     """
@@ -20,22 +20,22 @@ def plot_network_topology(mode="none", run_id=0, step_t=-1):
 
     # 1. Cargar datos
     data = np.load(file_path)
-    L_bb_history = data["L_bb"]
-    banks_history = data["banks_state"]
+    L_bb_history = data["matriz_interbancaria"]
+    banks_history = data["estado_bancos"]
     
     # Seleccionar el paso de tiempo (último por defecto)
     L = L_bb_history[step_t]
     banks = banks_history[step_t]
     
     # Extraer métricas para DebtRank y Visualización
-    # banks_state: [Liq, Equity, Dep, Bad, CHI, PSI, DefProb, TotalAssets]
+    # estado_bancos: [Liq, Equity, Dep, Bad, CHI, PSI, DefProb, TotalAssets]
     equity = banks[:, 1]
     total_assets = banks[:, 7]
     
     # Calcular DebtRank en tiempo real para el coloreado
     # v = Importancia relativa (Assets / Total System Assets)
     v = total_assets / (np.sum(total_assets) + 1e-9)
-    R = fn.compute_debtrank(L, equity, v)
+    R = fn.calcular_debtrank(L, equity, v)
 
     # 2. Construir Grafo NetworkX
     G = nx.DiGraph()
