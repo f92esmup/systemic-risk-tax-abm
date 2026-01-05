@@ -112,6 +112,7 @@ def calcular_impuesto_srt(
 
 # --- APPENDIX A: INTEREST RATE MECHANISM ---
 
+
 def calcular_fragilidad_financiera(leverage, k_mu=10.0):
     """
     Eq A1/A2 helper: mu(l) = tanh(k_mu * leverage)
@@ -122,12 +123,12 @@ def calcular_fragilidad_financiera(leverage, k_mu=10.0):
 def calcular_tasa_firma(r_bar, chi, fragility_firm):
     """
     Eq A1: r_if = r_bar * (1 + chi_i * mu(l_firm))
-    
+
     Args:
         r_bar: float, benchmark rate
         chi: (Batch,) bank specificity
         fragility_firm: (Batch,) or scalar firm fragility
-        
+
     Returns:
         rate: (Batch,)
     """
@@ -137,12 +138,12 @@ def calcular_tasa_firma(r_bar, chi, fragility_firm):
 def calcular_tasa_interbancaria(r_bar, psi, fragility_borrower):
     """
     Eq A2: r_ij = r_bar * (1 + psi_i * mu(l_borrower))
-    
+
     Args:
         r_bar: float
         psi: (Batch,) lender specificity
         fragility_borrower: (Batch,) or scalar borrower fragility
-        
+
     Returns:
         rate: (Batch,)
     """

@@ -23,11 +23,11 @@ class Parametros:
     # Banking & Credit
     R_BAR = 0.02  # Central bank baseline interest rate (r_bar)
     N_SEARCH = 5  # Number of banks a firm searches for credit (n)
-    
+
     # Interest Rate Mechanism (Appendix A)
     CHI_RANGE = (0.0, 1.0)  # Bank specificity for firm loans
     PSI_RANGE = (0.0, 0.1)  # Bank specificity for interbank loans
-    K_mu = 10.0             # Slope for hyperbolic tangent function
+    K_mu = 10.0  # Slope for hyperbolic tangent function
 
     # Debt & Regulation
     DEBT_REPAYMENT_RATE = 0.05  # Rate of debt reimbursement (tau)
