@@ -51,8 +51,8 @@ def run_batch(mode, param, n_runs=10, n_steps=200):
 def main():
     # Parámetros de ejecución
     # Ajustar según necesidad de velocidad vs precisión
-    N_RUNS = 2  # Reducido para testing rápido
-    STEPS = 50
+    N_RUNS = 100  # Reducido para testing rápido
+    STEPS = 500
 
     # 1. Ejecutar Escenarios
     data_none = run_batch("none", 0.0, N_RUNS, STEPS)

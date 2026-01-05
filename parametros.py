@@ -55,6 +55,42 @@ class Parametros:
     # Capital Adequacy for Initialization
     INIT_CAPITAL_RATIO = 0.10  # 10% Equity initially
 
+    # --- COLUMN INDICES (SCHEMA) ---
+
+    # Households (N=5)
+    IDX_HH_DEPOSITS = 0
+    IDX_HH_IS_OWNER = 1  # 0=Worker, 1=Owner
+    IDX_HH_OWNED_TYPE = 2  # 0=None, 1=Firm, 2=Bank
+    IDX_HH_OWNED_ENTITY_IDX = 3  # Index of Firm or Bank
+    IDX_HH_EMPLOYER_IDX = 4  # Index of Firm (Employer)
+    N_HH_FEATURES = 5
+
+    # Firms (N=11)
+    IDX_FIRM_LIQUIDITY = 0
+    IDX_FIRM_EQUITY = 1
+    IDX_FIRM_PRICE = 2
+    IDX_FIRM_DEMAND = 3
+    IDX_FIRM_PROD = 4  # Production/Inventory
+    IDX_FIRM_WORKERS = 5
+    IDX_FIRM_WAGES = 6  # Wages Bill
+    IDX_FIRM_PRICE_PREV = 7
+    IDX_FIRM_DEMAND_PREV = 8
+    IDX_FIRM_LEVERAGE = 9
+    IDX_FIRM_DEFAULT_FLAG = 10
+    N_FIRM_FEATURES = 11
+
+    # Banks (N=8)
+    IDX_BANK_LIQUIDITY = 0
+    IDX_BANK_EQUITY = 1
+    IDX_BANK_DEPOSITS = 2
+    IDX_BANK_BAD_DEBT = 3
+    IDX_BANK_OPERATING_COST_CHI = 4
+    IDX_BANK_INTERBANK_COST_PSI = 5
+    IDX_BANK_DEFAULT_PROB = 6
+    IDX_BANK_TOTAL_ASSETS = 7
+    N_BANK_FEATURES = 8
+
     @classmethod
     def get_dict(cls):
         return {k: v for k, v in cls.__dict__.items() if not k.startswith("__")}
+

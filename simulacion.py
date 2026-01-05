@@ -6,41 +6,8 @@ import funciones as fn
 class Modelo_CRISIS:
     """
     Vectorized implementation of the Poledna & Thurner (2016) ABM model.
-    Uses tensor-based state management to avoid explicit agent loops.
+    Phase 1: Data Architecture & Initialization.
     """
-
-    # --- State Indices (Class Constants) ---
-
-    # Banks State Indices (N=8)
-    IDX_BANK_LIQUIDITY = 0
-    IDX_BANK_EQUITY = 1
-    IDX_BANK_DEPOSITS = 2
-    IDX_BANK_BAD_DEBT = 3
-    IDX_BANK_OPERATING_COST_CHI = 4
-    IDX_BANK_INTERBANK_COST_PSI = 5
-    IDX_BANK_DEFAULT_PROB = 6
-    IDX_BANK_TOTAL_ASSETS = 7
-    N_BANK_FEATURES = 8
-
-    # Firms State Indices (N=11)
-    IDX_FIRM_LIQUIDITY = 0
-    IDX_FIRM_EQUITY = 1
-    IDX_FIRM_PRICE = 2
-    IDX_FIRM_DEMAND = 3
-    IDX_FIRM_PROD = 4  # Production/Inventory
-    IDX_FIRM_WORKERS = 5
-    IDX_FIRM_WAGES = 6  # Wages Bill
-    IDX_FIRM_PRICE_PREV = 7
-    IDX_FIRM_DEMAND_PREV = 8
-    IDX_FIRM_LEVERAGE = 9
-    IDX_FIRM_DEFAULT_FLAG = 10
-    N_FIRM_FEATURES = 11
-
-    # Households State Indices (N=3)
-    IDX_HH_DEPOSITS = 0
-    IDX_HH_IS_OWNER = 1  # 0=Worker, 1=Owner
-    IDX_HH_OWNED_ENTITY_IDX = 2  # Index of Firm or Bank owned
-    N_HH_FEATURES = 3
 
     def __init__(self, seed=None, tax_mode="none", tax_param=0.0):
         self.rng = np.random.default_rng(seed)
@@ -49,7 +16,7 @@ class Modelo_CRISIS:
         self.tax_mode = tax_mode.lower()
         self.tax_param = tax_param
 
-        # Metrics for Analysis
+        # Metrics for Analysis (Placeholders)
         self.current_step_loss = 0.0
         self.current_step_defaults = 0
         self.current_step_volume = 0.0
@@ -58,7 +25,7 @@ class Modelo_CRISIS:
 
     def reset(self):
         """
-        Reset or initialize all state tensors and network topologies for a new simulacion run.
+        Reset or initialize all state tensors and network topologies for a new simulation run.
         """
         # --- Dimensions ---
         B = Parametros.B
@@ -66,73 +33,87 @@ class Modelo_CRISIS:
         H = Parametros.H
 
         # --- 1. Agents State (Tensors) ---
-        self.estado_bancos = np.zeros((B, self.N_BANK_FEATURES), dtype=np.float64)
-        self.estado_firmas = np.zeros((F, self.N_FIRM_FEATURES), dtype=np.float64)
-        self.estado_hogares = np.zeros((H, self.N_HH_FEATURES), dtype=np.float64)
+        self.estado_bancos = np.zeros((B, Parametros.N_BANK_FEATURES), dtype=np.float64)
+        self.estado_firmas = np.zeros((F, Parametros.N_FIRM_FEATURES), dtype=np.float64)
+        self.estado_hogares = np.zeros((H, Parametros.N_HH_FEATURES), dtype=np.float64)
 
         # --- 2. Vectorized Initialization ---
 
-        # Banks: Specificity Parameters (Constant per run)
+        # --- BANKS ---
+        # Specificity Parameters (Constant per run)
         # CHI ~ U(0, 1)
-        self.estado_bancos[:, self.IDX_BANK_OPERATING_COST_CHI] = self.rng.uniform(
-            Parametros.CHI_RANGE[0], Parametros.CHI_RANGE[1], size=B
+        self.estado_bancos[:, Parametros.IDX_BANK_OPERATING_COST_CHI] = (
+            self.rng.uniform(Parametros.CHI_RANGE[0], Parametros.CHI_RANGE[1], size=B)
         )
         # PSI ~ U(0, 0.1)
-        self.estado_bancos[:, self.IDX_BANK_INTERBANK_COST_PSI] = self.rng.uniform(
-            Parametros.PSI_RANGE[0], Parametros.PSI_RANGE[1], size=B
+        self.estado_bancos[:, Parametros.IDX_BANK_INTERBANK_COST_PSI] = (
+            self.rng.uniform(Parametros.PSI_RANGE[0], Parametros.PSI_RANGE[1], size=B)
         )
 
-        # Bank Financials
+        # Financials
         init_bank_assets = self.rng.uniform(
             Parametros.INIT_BANK_ASSETS[0], Parametros.INIT_BANK_ASSETS[1], size=B
         )
-        self.estado_bancos[:, self.IDX_BANK_TOTAL_ASSETS] = init_bank_assets
+        self.estado_bancos[:, Parametros.IDX_BANK_TOTAL_ASSETS] = init_bank_assets
         # Equity = Assets * Capital Ratio
-        self.estado_bancos[:, self.IDX_BANK_EQUITY] = (
+        self.estado_bancos[:, Parametros.IDX_BANK_EQUITY] = (
             init_bank_assets * Parametros.INIT_CAPITAL_RATIO
         )
         # Liquidity = Assets (Assuming start with all liquid)
-        self.estado_bancos[:, self.IDX_BANK_LIQUIDITY] = init_bank_assets
+        self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY] = init_bank_assets
         # Deposits = Assets - Equity
-        self.estado_bancos[:, self.IDX_BANK_DEPOSITS] = (
-            init_bank_assets - self.estado_bancos[:, self.IDX_BANK_EQUITY]
+        self.estado_bancos[:, Parametros.IDX_BANK_DEPOSITS] = (
+            init_bank_assets - self.estado_bancos[:, Parametros.IDX_BANK_EQUITY]
         )
 
-        # Firms
+        # --- FIRMS ---
         init_firm_assets = self.rng.uniform(
             Parametros.INIT_FIRM_ASSETS[0], Parametros.INIT_FIRM_ASSETS[1], size=F
         )
-        self.estado_firmas[:, self.IDX_FIRM_EQUITY] = init_firm_assets
-        self.estado_firmas[:, self.IDX_FIRM_LIQUIDITY] = init_firm_assets
+        self.estado_firmas[:, Parametros.IDX_FIRM_EQUITY] = init_firm_assets
+        self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] = init_firm_assets
 
         # Initialize Price to Marginal Cost
         init_price = Parametros.WAGE / Parametros.alpha
-        self.estado_firmas[:, self.IDX_FIRM_PRICE] = init_price
-        self.estado_firmas[:, self.IDX_FIRM_PRICE_PREV] = init_price
+        self.estado_firmas[:, Parametros.IDX_FIRM_PRICE] = init_price
+        self.estado_firmas[:, Parametros.IDX_FIRM_PRICE_PREV] = init_price
 
-        # Households: Owners vs Workers
-        # Random assignment
+        # --- HOUSEHOLDS (CRITICAL UPDATE) ---
+        # 1. Shuffle Household Indices
         hh_indices = np.arange(H)
         self.rng.shuffle(hh_indices)
 
-        # First F households own Firms
+        # 2. Assign Owners
+        # First F households -> Firm Owners
         firm_owners = hh_indices[:F]
-        self.estado_hogares[firm_owners, self.IDX_HH_IS_OWNER] = 1.0
-        self.estado_hogares[firm_owners, self.IDX_HH_OWNED_ENTITY_IDX] = np.arange(F)
+        self.estado_hogares[firm_owners, Parametros.IDX_HH_IS_OWNER] = 1.0
+        self.estado_hogares[firm_owners, Parametros.IDX_HH_OWNED_TYPE] = 1.0  # 1=Firm
+        self.estado_hogares[firm_owners, Parametros.IDX_HH_OWNED_ENTITY_IDX] = (
+            np.arange(F)
+        )
 
-        # Next B households own Banks
+        # Next B households -> Bank Owners
         bank_owners = hh_indices[F : F + B]
-        self.estado_hogares[bank_owners, self.IDX_HH_IS_OWNER] = 1.0
-        self.estado_hogares[bank_owners, self.IDX_HH_OWNED_ENTITY_IDX] = np.arange(B)
+        self.estado_hogares[bank_owners, Parametros.IDX_HH_IS_OWNER] = 1.0
+        self.estado_hogares[bank_owners, Parametros.IDX_HH_OWNED_TYPE] = 2.0  # 2=Bank
+        self.estado_hogares[bank_owners, Parametros.IDX_HH_OWNED_ENTITY_IDX] = (
+            np.arange(B)
+        )
 
-        # Remaining are Workers (Default 0, 0)
+        # 3. Assign Employers (To ALL households, assuming full employment or potential)
+        # Randomly assign an employer index (0..F-1)
+        self.estado_hogares[:, Parametros.IDX_HH_EMPLOYER_IDX] = self.rng.integers(
+            0, F, size=H
+        )
 
         # --- 3. Topology & Relationships ---
         self.matriz_interbancaria = np.zeros((B, B), dtype=np.float64)
         self.matriz_credito_firmas = np.zeros((F, B), dtype=np.float64)
 
-        # Bank/Employer Relationships for Workers
-        self.hh_employer_idx = self.rng.integers(0, F, size=H)
+        # Note: hh_employer_idx is now in self.estado_hogares
+        # hh_bank_idx (Choice of bank for deposits?) - Not strictly in state tensor, can be auxiliary.
+        # Keeping it as auxiliary if needed for loop, but strictly state tensor has the core data.
+        # We will keep hh_bank_idx auxiliary for consistency with previous logic if needed.
         self.hh_bank_idx = self.rng.integers(0, B, size=H)
 
         # --- 4. History / Traceability ---
@@ -141,9 +122,7 @@ class Modelo_CRISIS:
             "matriz_credito_firmas": [],
             "estado_bancos": [],
             "estado_firmas": [],
-            "hh_bank_idx": [],
-            # "hh_employer_idx": [] # Not strictly requested in prompt list but useful.
-            # Prompt asked for: matriz_interbancaria, matriz_credito_firmas, estado_bancos, estado_firmas, hh_bank_idx.
+            "estado_hogares": [],  # Full tensor capture
         }
 
         self.registrar_historia()
@@ -165,9 +144,9 @@ class Modelo_CRISIS:
         self.step_buffer["estado_firmas"].append(
             self.estado_firmas.astype(np.float32).copy()
         )
-
-        # Relations
-        self.step_buffer["hh_bank_idx"].append(self.hh_bank_idx.astype(np.int16).copy())
+        self.step_buffer["estado_hogares"].append(
+            self.estado_hogares.astype(np.float32).copy()
+        )
 
     def reset_history(self):
         """Clear the step buffer to free RAM after flushing."""
@@ -197,28 +176,27 @@ class Modelo_CRISIS:
 
     def paso_planificacion_firmas(self):
         """
-        Phase 1: Firms Planning.
+        Phase 2: Firms Planning.
         - Update Prices based on market average.
-        - Update Expected Demand (simple stochastic process for now).
+        - Update Expected Demand (simple stochastic process).
         - Calculate Labor requirements.
         - Update Financial Health (Leverage) for Appendix A interest rates.
         - Calculate Credit Demand if Wages > Liquidity.
         """
         # --- 1. Update Prices ---
-        # Calculate market average price
-        p_avg = np.mean(self.estado_firmas[:, self.IDX_FIRM_PRICE])
-
-        # Vector of current prices
-        prices = self.estado_firmas[:, self.IDX_FIRM_PRICE]
+        prices = self.estado_firmas[:, Parametros.IDX_FIRM_PRICE]
 
         # Save to PREV
-        self.estado_firmas[:, self.IDX_FIRM_PRICE_PREV] = prices
+        self.estado_firmas[:, Parametros.IDX_FIRM_PRICE_PREV] = prices.copy()
+
+        # Calculate market average price
+        p_avg = np.mean(prices)
 
         # Noise component
         noise = self.rng.normal(0, Parametros.PRICE_DRIFT_STD, size=Parametros.F)
 
         # Adjustment Rule: p_new = p * (1 + speed * (p_avg - p)/p_avg + noise)
-        # Avoid division by zero if p_avg is 0 (unlikely but safe)
+        # Avoid division by zero if p_avg is 0
         if p_avg > 1e-9:
             adjustment = Parametros.PRICE_ADJUSTMENT_SPEED * (p_avg - prices) / p_avg
             new_prices = prices + prices * (adjustment + noise)
@@ -228,50 +206,49 @@ class Modelo_CRISIS:
         # Constraint: Prices must be positive
         new_prices = np.maximum(new_prices, 0.01)
 
-        self.estado_firmas[:, self.IDX_FIRM_PRICE] = new_prices
+        self.estado_firmas[:, Parametros.IDX_FIRM_PRICE] = new_prices
 
         # --- 2. Update Demand Expectations ---
         # Save previous demand
-        self.estado_firmas[:, self.IDX_FIRM_DEMAND_PREV] = self.estado_firmas[
-            :, self.IDX_FIRM_DEMAND
-        ]
+        self.estado_firmas[:, Parametros.IDX_FIRM_DEMAND_PREV] = self.estado_firmas[
+            :, Parametros.IDX_FIRM_DEMAND
+        ].copy()
 
         # Initialize demand if 0 (start of sim)
-        current_demand = self.estado_firmas[:, self.IDX_FIRM_DEMAND]
+        current_demand = self.estado_firmas[:, Parametros.IDX_FIRM_DEMAND]
+
         if np.all(current_demand == 0):
-            # Initialize random demand around expected production capacity
-            # Capacity ~ Liquidity / Wage * Alpha? Just random start.
             current_demand = self.rng.uniform(10, 50, size=Parametros.F)
 
         # Random Walk: D(t) = D(t-1) * (1 + noise)
-        demand_shock = self.rng.normal(0, 0.05, size=Parametros.F)  # 5% volatility
+        # Using 5% volatility as a reasonable default for "xi"
+        demand_shock = self.rng.normal(0, 0.05, size=Parametros.F)
         new_demand = current_demand * (1 + demand_shock)
         new_demand = np.maximum(new_demand, 0.0)
 
-        self.estado_firmas[:, self.IDX_FIRM_DEMAND] = new_demand
+        self.estado_firmas[:, Parametros.IDX_FIRM_DEMAND] = new_demand
 
         # --- 3. Production Planning ---
         # Labor Needed = Ceil(Demand / Alpha)
         labor_needed = np.ceil(new_demand / Parametros.alpha)
 
-        self.estado_firmas[:, self.IDX_FIRM_WORKERS] = labor_needed
-        self.estado_firmas[:, self.IDX_FIRM_PROD] = (
+        self.estado_firmas[:, Parametros.IDX_FIRM_WORKERS] = labor_needed
+        self.estado_firmas[:, Parametros.IDX_FIRM_PROD] = (
             labor_needed * Parametros.alpha
-        )  # Potential production
+        )
 
         # Wage Bill
         wage_bill = labor_needed * Parametros.WAGE
-        self.estado_firmas[:, self.IDX_FIRM_WAGES] = wage_bill
+        self.estado_firmas[:, Parametros.IDX_FIRM_WAGES] = wage_bill
 
-        # --- 4. Financial Health Update (CRITICAL for Appendix A) ---
-        # Leverage = Debt / (Liquidity + 1e-9)
+        # --- 4. Financial Health Update (Leverage) ---
+        # Leverage = Debt / (Liquidity + epsilon)
         # Current Debt = Sum of loans from all banks (matriz_credito_firmas rows)
         current_debt = np.sum(self.matriz_credito_firmas, axis=1)  # (F,)
-        liquidity = self.estado_firmas[:, self.IDX_FIRM_LIQUIDITY]
+        liquidity = self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY]
 
-        # Avoid division by zero
         leverage = current_debt / (liquidity + 1e-9)
-        self.estado_firmas[:, self.IDX_FIRM_LEVERAGE] = leverage
+        self.estado_firmas[:, Parametros.IDX_FIRM_LEVERAGE] = leverage
 
         # --- 5. Credit Demand Calculation ---
         # Gap = Wages - Liquidity
@@ -285,14 +262,12 @@ class Modelo_CRISIS:
 
     def paso_mercado_bancario(self):
         """
-        Phase 2: Credit Market (Firms-Banks) & Interbank Market (SRT).
+        Phase 3: Credit Market (Firms-Banks) & Interbank Market (SRT).
 
         Part A: Firms request credit from Banks (Eq A1).
         Part B: Banks manage liquidity deficits via Interbank Market using DebtRank-based SRT (Eq A2 + Eq 5).
         Part C: Disbursement of funds to firms.
         """
-        import funciones as fn
-
         # --- PART A: CREDIT MARKET (Firms -> Banks) ---
 
         # 1. Firms select N_SEARCH banks randomly
@@ -307,12 +282,12 @@ class Modelo_CRISIS:
         # Get Bank Specificity Chi for the selected banks
         # self.estado_bancos column CHI is (B,). Indexing with (F, N) -> (F, N)
         bank_chi_pool = self.estado_bancos[
-            pool_indices, self.IDX_BANK_OPERATING_COST_CHI
+            pool_indices, Parametros.IDX_BANK_OPERATING_COST_CHI
         ]
 
         # Get Firm Leverage
         # self.estado_firmas column LEVERAGE is (F,) -> Broadcast to (F, N)
-        firm_leverage = self.estado_firmas[:, self.IDX_FIRM_LEVERAGE]
+        firm_leverage = self.estado_firmas[:, Parametros.IDX_FIRM_LEVERAGE]
         firm_leverage_broad = firm_leverage[:, np.newaxis]
 
         # Calculate Firm Fragility mu(l)
@@ -333,14 +308,14 @@ class Modelo_CRISIS:
         chosen_bank_ids = pool_indices[np.arange(Parametros.F), best_choice_local_idx]
 
         # 4. Aggregate Credit Demand per Bank
-        # self.current_firm_credit_demand is (F,) from Phase 1
+        # self.current_firm_credit_demand is (F,) from Phase 2
         bank_credit_demand = np.zeros(Parametros.B)
         np.add.at(bank_credit_demand, chosen_bank_ids, self.current_firm_credit_demand)
 
         # --- PART B: INTERBANK MARKET & SRT ---
 
         # 1. Identify Liquidity Gaps
-        bank_liquidity = self.estado_bancos[:, self.IDX_BANK_LIQUIDITY]
+        bank_liquidity = self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY]
         gaps = bank_credit_demand - bank_liquidity
 
         deficit_ids = np.where(gaps > 0)[0]
@@ -348,13 +323,11 @@ class Modelo_CRISIS:
 
         if len(deficit_ids) > 0 and len(surplus_ids) > 0:
             # 2. Generate Candidate Pairs (Deficit, Surplus)
-            # Meshgrid for all combinations
-            # We want arrays of shape (N_pairs,)
-            # d_mesh, s_mesh = np.meshgrid(deficit_ids, surplus_ids, indexing='ij')
-            # But we can just repeat:
             n_def = len(deficit_ids)
             n_sur = len(surplus_ids)
 
+            # d_indices: [d1, d1, ..., d2, d2, ...]
+            # s_indices: [s1, s2, ..., s1, s2, ...]
             d_indices = np.repeat(deficit_ids, n_sur)
             s_indices = np.tile(surplus_ids, n_def)
 
@@ -362,21 +335,21 @@ class Modelo_CRISIS:
             # r_ij = r_bar * (1 + psi_i * mu(leverage_j))
             # i = Lender (s_indices), j = Borrower (d_indices)
 
-            psi_lender = self.estado_bancos[s_indices, self.IDX_BANK_INTERBANK_COST_PSI]
+            psi_lender = self.estado_bancos[
+                s_indices, Parametros.IDX_BANK_INTERBANK_COST_PSI
+            ]
 
             # Borrower Leverage needed.
-            # Bank Leverage = (Deposits + Interbank Borrowing) / Equity ??
-            # Or Total Liabilities / Equity.
-            # Simplified Leverage for Interbank Rate:
-            # Paper says "borrower's leverage l_j(t)".
-            # Let's use current BadDebt + Deposits ratio or just Liabilities/Equity.
-            # We haven't updated Liabilities yet (it's t).
-            # Use matriz_interbancaria col sum (borrowing) + Deposits.
-            current_liabilities = self.estado_bancos[
-                :, self.IDX_BANK_DEPOSITS
-            ] + np.sum(self.matriz_interbancaria, axis=1)
-            equity = self.estado_bancos[:, self.IDX_BANK_EQUITY]
-            bank_leverage = np.divide(current_liabilities, equity + 1e-9)  # (B,)
+            # Bank Leverage = (Deposits + Interbank Borrowing) / Equity
+            # Use current state.
+            current_ib_borrowing = np.sum(
+                self.matriz_interbancaria, axis=1
+            )  # Row sum = Borrowing
+            current_deposits = self.estado_bancos[:, Parametros.IDX_BANK_DEPOSITS]
+            equity = self.estado_bancos[:, Parametros.IDX_BANK_EQUITY]
+
+            # Avoid division by zero
+            bank_leverage = (current_deposits + current_ib_borrowing) / (equity + 1e-9)
 
             lev_borrower = bank_leverage[d_indices]
 
@@ -389,13 +362,8 @@ class Modelo_CRISIS:
             )
 
             # 4. Calculate Taxes (SRT or Tobin)
-            # We need to know the 'Amount' to calculate tax.
-            # But Amount depends on the transaction decision (min(gap, surplus)).
-            # For SORTING, we need a metric.
-            # Proposed approach: Calculate tax for the *maximum possible transaction* or a unit?
-            # Correct approach: Calculate tax for `amount = min(gap[d], -gap[s])`.
-
-            # Surpluses are negative gaps
+            # Calculate 'potential_amount' = min(deficit, surplus)
+            # Surpluses are negative gaps, so take abs or negation
             current_surpluses = -gaps[s_indices]
             current_deficits = gaps[d_indices]
             potential_amounts = np.minimum(current_deficits, current_surpluses)
@@ -404,19 +372,15 @@ class Modelo_CRISIS:
 
             if self.tax_mode == "srt" and self.tax_param > 0:
                 # Prepare Inputs for SRT
-                # v = Total Assets
-                v = self.estado_bancos[:, self.IDX_BANK_TOTAL_ASSETS]
+                v = self.estado_bancos[:, Parametros.IDX_BANK_TOTAL_ASSETS]
 
-                # p_default = Function of Leverage? Or stored state?
-                # Eq A4 says p_i = 0.01 * mu(l_i).
+                # p_default = 0.01 * mu(l_i)
                 p_default = 0.01 * fn.calcular_fragilidad_financiera(
                     bank_leverage, Parametros.K_mu
                 )
 
                 # proposed_indices: Shape (N, 2) -> (Borrower, Lender)
-                # d_indices are borrowers, s_indices are lenders.
-                # matriz_interbancaria convention: Rows=Borrower, Cols=Lender.
-                # So indices = (d, s)
+                # matriz_interbancaria convention: Rows=Borrower, Cols=Lender
                 proposed_indices = np.column_stack((d_indices, s_indices))
 
                 # Compute Batch Tax
@@ -431,7 +395,7 @@ class Modelo_CRISIS:
                 )
 
             elif self.tax_mode == "tobin":
-                taxes = potential_amounts * self.tax_param  # 0.2% of amount
+                taxes = potential_amounts * self.tax_param  # Flat rate
 
             # 5. Total Cost for Sorting
             # Cost = Interest + Tax
@@ -439,7 +403,6 @@ class Modelo_CRISIS:
             total_costs = interest_costs + taxes
 
             # Effective Unit Cost (to compare efficiency)
-            # Avoid division by zero
             unit_costs = np.zeros_like(total_costs)
             mask_amt = potential_amounts > 1e-9
             unit_costs[mask_amt] = total_costs[mask_amt] / potential_amounts[mask_amt]
@@ -448,36 +411,34 @@ class Modelo_CRISIS:
             sorted_indices = np.argsort(unit_costs)
 
             # 6. Execute Transactions (Greedy)
-            # We must track dynamic gaps/surpluses as we iterate
-            # Working copies
-            dyn_gaps = gaps.copy()  # Positive for deficit
+            # Track dynamic gaps/surpluses
+            dyn_gaps = gaps.copy()
 
             for idx in sorted_indices:
                 d = d_indices[idx]
                 s = s_indices[idx]
 
-                # Check if still valid
+                # Check validity
                 if dyn_gaps[d] <= 1e-9:
                     continue  # Deficit filled
                 if dyn_gaps[s] >= -1e-9:
-                    continue  # Surplus exhausted (gap is negative)
+                    continue  # Surplus exhausted
 
                 # Amount
                 amount = min(dyn_gaps[d], -dyn_gaps[s])
                 if amount < 1e-9:
                     continue
 
-                # Execute
+                # Execute Interbank Loan
                 self.matriz_interbancaria[d, s] += amount
                 self.current_step_volume += amount
 
                 # Transfers
-                self.estado_bancos[d, self.IDX_BANK_LIQUIDITY] += amount
-                self.estado_bancos[s, self.IDX_BANK_LIQUIDITY] -= amount
+                self.estado_bancos[d, Parametros.IDX_BANK_LIQUIDITY] += amount
+                self.estado_bancos[s, Parametros.IDX_BANK_LIQUIDITY] -= amount
 
                 # Tax Payment (Deducted from Equity)
-                # Recalculate tax for actual amount?
-                # If amount == potential_amount, use precalc. Else proportional.
+                # Proportional tax if amount < potential_amount
                 pre_amt = potential_amounts[idx]
                 pre_tax = taxes[idx]
 
@@ -486,23 +447,19 @@ class Modelo_CRISIS:
                     actual_tax = pre_tax * (amount / pre_amt)
 
                 if actual_tax > 0:
-                    self.estado_bancos[d, self.IDX_BANK_EQUITY] -= actual_tax
+                    self.estado_bancos[d, Parametros.IDX_BANK_EQUITY] -= actual_tax
 
-                # Update Gaps
+                # Update Dynamic Gaps
                 dyn_gaps[d] -= amount
-                dyn_gaps[s] += amount  # Moving towards 0 from negative
+                dyn_gaps[s] += amount
 
         # --- PART C: DISBURSEMENT TO FIRMS ---
         # Banks now have Final Liquidity.
         # Fulfill 'bank_credit_demand'.
 
-        # We need to map back to individual firms.
-        # But first, check Bank Solvency/Liquidity Ratio for payout.
+        final_liquidity = self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY]
 
-        final_liquidity = self.estado_bancos[:, self.IDX_BANK_LIQUIDITY]
-        # Ratio of Available vs Demanded
-        # payout_ratio[b] = min(1.0, final_liquidity[b] / demand[b])
-
+        # Payout Ratio: min(1.0, Available / Demanded)
         payout_ratios = np.ones(Parametros.B)
         mask_demand = bank_credit_demand > 1e-9
         np.divide(
@@ -510,31 +467,23 @@ class Modelo_CRISIS:
         )
         payout_ratios = np.minimum(1.0, payout_ratios)
 
-        # Execute Firm Loans
-        # Iterate Firms? Or Vectorized?
-        # Vectorized:
-        # We know `chosen_bank_ids` (F,) and `current_firm_credit_demand` (F,)
-        # Approved Amount = Demand * PayoutRatio[ChosenBank]
-
+        # Calculate Approved Amounts per Firm
         approved_amounts = (
             self.current_firm_credit_demand * payout_ratios[chosen_bank_ids]
         )
 
         # Update matriz_credito_firmas
-        # We can loop F (100 is small) or use advanced indexing if we had matriz_credito_firmas as (F, B).
-        # matriz_credito_firmas is (F, B).
-        # We want: matriz_credito_firmas[f, chosen_bank[f]] += approved[f]
-        # This is strictly one bank per firm per step.
+        # One bank per firm per step (chosen_bank_ids)
         f_indices = np.arange(Parametros.F)
         self.matriz_credito_firmas[f_indices, chosen_bank_ids] += approved_amounts
 
         # Transfers
         # Firm gets Liquidity
-        self.estado_firmas[:, self.IDX_FIRM_LIQUIDITY] += approved_amounts
+        self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] += approved_amounts
+
         # Bank loses Liquidity
-        # Use np.add.at for banks (many firms to one bank)
         np.add.at(
-            self.estado_bancos[:, self.IDX_BANK_LIQUIDITY],
+            self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY],
             chosen_bank_ids,
             -approved_amounts,
         )
@@ -550,25 +499,35 @@ class Modelo_CRISIS:
 
         # 1. Production
         # Inventory = Workers * Alpha
-        workers = self.estado_firmas[:, self.IDX_FIRM_WORKERS]
+        workers = self.estado_firmas[:, Parametros.IDX_FIRM_WORKERS]
         new_production = workers * Parametros.alpha
 
         # Add to existing inventory (Stock)
-        self.estado_firmas[:, self.IDX_FIRM_PROD] += new_production
+        # Note: In Phase 2 we set IDX_FIRM_PROD to new_production.
+        # Ideally, IDX_FIRM_PROD should accumulate if we want inventory dynamics.
+        # But per Phase 2 logic, we overwrote it. Let's assume perishable goods or overwrite for now
+        # as per previous logic, OR simpler: Phase 2 set the *capacity*?
+        # Let's trust Phase 2 set IDX_FIRM_PROD correctly as the goods available now.
+        # If we wanted accumulation: self.estado_firmas[:, ...] += new_production.
+        # Given Phase 2: self.estado_firmas[:, IDX_FIRM_PROD] = labor * alpha.
+        # We will proceed with that as the "Inventory for this period".
 
         # 2. Wage Payment
-        wage_bills = self.estado_firmas[:, self.IDX_FIRM_WAGES]
-        firm_liquidity = self.estado_firmas[:, self.IDX_FIRM_LIQUIDITY]
+        wage_bills = self.estado_firmas[:, Parametros.IDX_FIRM_WAGES]
+        firm_liquidity = self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY]
 
         # Actual Payment = Min(Bill, Liquidity)
         payments = np.minimum(wage_bills, firm_liquidity)
 
         # Deduct from Firms
-        self.estado_firmas[:, self.IDX_FIRM_LIQUIDITY] -= payments
+        self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] -= payments
 
         # Distribute to Households (Workers)
         # 1. Count employees per firm
-        employee_counts = np.bincount(self.hh_employer_idx, minlength=Parametros.F)
+        # Household Employer Index
+        hh_emp_idx = self.estado_hogares[:, Parametros.IDX_HH_EMPLOYER_IDX].astype(int)
+
+        employee_counts = np.bincount(hh_emp_idx, minlength=Parametros.F)
 
         # 2. Calculate wage per worker (Average for that firm)
         wage_per_worker = np.zeros(Parametros.F)
@@ -576,14 +535,14 @@ class Modelo_CRISIS:
         np.divide(payments, employee_counts, out=wage_per_worker, where=mask_c)
 
         # 3. Assign to specific households
-        hh_income = wage_per_worker[self.hh_employer_idx]
-        self.estado_hogares[:, self.IDX_HH_DEPOSITS] += hh_income
+        hh_income = wage_per_worker[hh_emp_idx]
+        self.estado_hogares[:, Parametros.IDX_HH_DEPOSITS] += hh_income
 
         # --- B. CONSUMPTION MARKET ---
 
         # 1. Budget
         # B_h = Deposits * c
-        hh_deposits = self.estado_hogares[:, self.IDX_HH_DEPOSITS]
+        hh_deposits = self.estado_hogares[:, Parametros.IDX_HH_DEPOSITS]
         budgets = hh_deposits * Parametros.c
 
         # 2. Firm Selection (Z-Search)
@@ -593,7 +552,7 @@ class Modelo_CRISIS:
         )
 
         # Get Prices: (H, Z)
-        prices_options = self.estado_firmas[z_indices, self.IDX_FIRM_PRICE]
+        prices_options = self.estado_firmas[z_indices, Parametros.IDX_FIRM_PRICE]
 
         # Select min price
         winner_local_indices = np.argmin(prices_options, axis=1)  # (H,)
@@ -608,8 +567,8 @@ class Modelo_CRISIS:
         )
 
         # 4. Sales & Rationing
-        firm_prices = self.estado_firmas[:, self.IDX_FIRM_PRICE]
-        firm_inventory = self.estado_firmas[:, self.IDX_FIRM_PROD]
+        firm_prices = self.estado_firmas[:, Parametros.IDX_FIRM_PRICE]
+        firm_inventory = self.estado_firmas[:, Parametros.IDX_FIRM_PROD]
 
         max_revenue = firm_inventory * firm_prices
 
@@ -622,8 +581,8 @@ class Modelo_CRISIS:
         np.divide(actual_revenue, firm_prices, out=sales_qty, where=price_mask)
 
         # Update Firms
-        self.estado_firmas[:, self.IDX_FIRM_LIQUIDITY] += actual_revenue
-        self.estado_firmas[:, self.IDX_FIRM_PROD] -= sales_qty
+        self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] += actual_revenue
+        self.estado_firmas[:, Parametros.IDX_FIRM_PROD] -= sales_qty
 
         # 5. Households Expenditure (Rationing)
         # If Demand > Max_Revenue, households spent less than `budgets`.
@@ -639,7 +598,7 @@ class Modelo_CRISIS:
         hh_scale = scale_factors[winner_global_indices]
         hh_expenditure = budgets * hh_scale
 
-        self.estado_hogares[:, self.IDX_HH_DEPOSITS] -= hh_expenditure
+        self.estado_hogares[:, Parametros.IDX_HH_DEPOSITS] -= hh_expenditure
 
     def paso_contabilidad(self):
         """
@@ -666,8 +625,8 @@ class Modelo_CRISIS:
         total_pay_firm = np.sum(repayment_firms, axis=1)  # Per Firm
         total_receive_bank = np.sum(repayment_firms, axis=0)  # Per Bank
 
-        self.estado_firmas[:, self.IDX_FIRM_LIQUIDITY] -= total_pay_firm
-        self.estado_bancos[:, self.IDX_BANK_LIQUIDITY] += total_receive_bank
+        self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] -= total_pay_firm
+        self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY] += total_receive_bank
         self.matriz_credito_firmas -= repayment_firms
 
         # 2. Interbank (matriz_interbancaria)
@@ -679,177 +638,66 @@ class Modelo_CRISIS:
         total_pay_bank = np.sum(repayment_ib, axis=1)
         total_receive_bank_ib = np.sum(repayment_ib, axis=0)
 
-        self.estado_bancos[:, self.IDX_BANK_LIQUIDITY] -= total_pay_bank
-        self.estado_bancos[:, self.IDX_BANK_LIQUIDITY] += total_receive_bank_ib
+        self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY] -= total_pay_bank
+        self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY] += total_receive_bank_ib
         self.matriz_interbancaria -= repayment_ib
 
         # --- B. DIVIDENDS ---
+
         # 1. Firms
         # Profit Proxy: Positive Liquidity
-        firm_liq = self.estado_firmas[:, self.IDX_FIRM_LIQUIDITY]
+        firm_liq = self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY]
         distributable_f = np.maximum(0, firm_liq)
         dividends_f = distributable_f * Parametros.DIVIDEND_RATIO
 
         # Deduct
-        self.estado_firmas[:, self.IDX_FIRM_LIQUIDITY] -= dividends_f
+        self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] -= dividends_f
 
-        # Distribute to Owners
-        # We need to map Firm ID -> Household Owners.
-        # In Init, we assigned first F households as owners of Firm 0..F-1.
-        # Check Init logic:
-        # firm_owners = hh_indices[:F]
-        # self.estado_hogares[firm_owners, IDX_HH_OWNED_ENTITY_IDX] = np.arange(F)
-        # So HH 'h' owns Firm 'h' (if h < F and shuffled indices handled).
-        # Wait, Init did:
-        # hh_indices shuffled.
-        # firm_owners = hh_indices[:F]. assigned entity_idx 0..F.
-        # So we can't just index HH array 0..F. We need the specific indices.
-        # But wait! We don't store the shuffled `hh_indices` array in state.
-        # We marked `IS_OWNER=1` and `OWNED_ENTITY_IDX`.
-        # To vector distribute: We need to know WHICH HH owns Firm i.
-        # Since ownership is 1-to-1 in this setup (1300 HH, 100 Firms, 20 Banks),
-        # we can iterate or use a reverse map.
-        # Given we didn't save the reverse map efficiently, but N_HH is small (1300).
-        # We can create a temporary map or assumption.
-        # Better: Update HHs based on their `OWNED_ENTITY_IDX`.
+        # Distribute to Owners (Vectorized)
+        # Households with OWNED_TYPE == 1 (Firms)
+        hh_is_firm_owner = self.estado_hogares[:, Parametros.IDX_HH_OWNED_TYPE] == 1
+        # Get the ID of the firm they own
+        owned_firm_idx = self.estado_hogares[
+            hh_is_firm_owner, Parametros.IDX_HH_OWNED_ENTITY_IDX
+        ].astype(int)
 
-        # Vectorized Update for Households:
-        # Create a "Dividend Payout Vector" of size (Total_Entities,).
-        # Max Entity ID is max(F, B).
-        # Let's handle Firms and Banks separately.
-        # HHs with IS_OWNER=1.
-        # But we need to distinguish Firm Owners from Bank Owners.
-        # In Init, we didn't add a "TYPE_OWNER" flag. Just "IS_OWNER".
-        # However, Firm Indices are 0..F-1. Bank Indices are 0..B-1.
-        # This creates ambiguity if we don't know if they own a Firm or Bank.
-        # Init Logic:
-        # firm_owners assigned 0..F
-        # bank_owners assigned 0..B
-        # Overlap! Firm 0 and Bank 0 have same ID.
-        # We need to fix this or assume a range split.
-        # FIX: We will assume we can't easily distinguish without a type flag.
-        # BUT, since we are in `paso_contabilidad`, we can cheat slightly for speed:
-        # We can construct the income vector for ALL households.
-        # But wait, we don't know who is who.
-        # CRITICAL FIX: The current state tensor `estado_hogares` is insufficient strictly.
-        # However, we can deduce it or simply accept that we must update based on the known shuffled order if we had it.
-        # Let's use a heuristic: The Init Code assigned Firm Owners FIRST, then Bank Owners.
-        # But we don't have the shuffled list.
-        #
-        # Alternative: Re-scan `estado_hogares`.
-        # owners_mask = self.estado_hogares[:, self.IDX_HH_IS_OWNER] == 1
-        # entities = self.estado_hogares[owners_mask, self.IDX_HH_OWNED_ENTITY_IDX]
-        # This doesn't tell us if entity 0 is Firm 0 or Bank 0.
-        #
-        # PROPOSED SOLUTION (Robust):
-        # Since we can't change Init now (it's in reset), let's assume strict partition is needed but missing.
-        # ACTUALLY, checking `reset`:
-        # `hh_indices[:F]` -> Owners of Firms.
-        # `hh_indices[F:F+B]` -> Owners of Banks.
-        # Since `reset` is called once, we assume the `hh_indices` order is lost?
-        # No! `reset` is called at start.
-        # We should store `self.firm_owner_ids` and `self.bank_owner_ids` in `reset`.
-        # Since we modified `reset` in Phase 1, check if we stored it? No.
-        #
-        # EMERGENCY FIX:
-        # Modify `paso_contabilidad` to RE-DERIVE ownership? Impossible without data.
-        # BUT, we can rely on `reset` being deterministic with seed.
-        # OR, better: Add a "Type" column to HH State? Too late for Phase 1 code.
-        #
-        # PRAGMATIC FIX:
-        # In `reset`, we did `rng.shuffle`.
-        # Let's regenerate the shuffle using the same seed? Risky.
-        #
-        # Let's look at `estado_hogares` dimensions. We have 3 columns.
-        # We can use the fact that there are exactly F firm owners and B bank owners.
-        # But which is which?
-        #
-        # Let's assume for this simulacion run we iterate:
-        # Since we can't perfectly vectorise without the map, let's skip strict mapping
-        # and distribute dividends *statistically* or uniformly?
-        # NO. That breaks accounting.
-        #
-        # REAL FIX: We will modify `reset` (Hot-patch) or add attributes in `__init__`?
-        # No, `reset` is already written.
-        # Let's use `np.random.default_rng(seed)`...
-        #
-        # WAIT. The `reset` method in Phase 1 used `self.rng`.
-        # The `paso_contabilidad` can access `self.estado_hogares`.
-        #
-        # Let's assume we can add a persistent attribute `self.firm_owner_indices` in `reset`
-        # IF we were editing `reset`. We are not.
-        #
-        # WORKAROUND:
-        # We will assume that households 0..F-1 are Firm Owners and F..F+B-1 are Bank Owners
-        # IF we hadn't shuffled. But we shuffled.
-        #
-        # OK, look at `reset` code in memory (from `read_file` or context).
-        # It assigns: `self.estado_hogares[firm_owners, IDX_HH_IS_OWNER] = 1.0`
-        # It sets `IDX_HH_OWNED_ENTITY_IDX`.
-        #
-        # Since we are stuck with the state as defined, we might have to use a heuristic:
-        # There is no overlap in IDs *conceptually* if we mapped them to 0..F+B.
-        # But we mapped them to 0..F and 0..B.
-        #
-        # OPTION: Redistribute dividends to ALL owners uniformly? (Socialism).
-        # This preserves conservation of money but loses granularity.
-        # Given the constraints and the flaw in Phase 1 Init (ambiguous ownership),
-        # this is the safest mathematical approach to avoid crashing or money leaks.
-        #
-        # BETTER OPTION:
-        # We can reconstruct the indices if we assume the shuffle is not stored but
-        # we can just pick the first F owners found as Firm owners?
-        # Since it was random, any random assignment of the existing owners to firms is statistically equivalent
-        # to the original random assignment (assuming no correlation with other attributes).
-        # Yes! "Anonymity of Agents".
-        # So:
-        # 1. Find all HHs with IS_OWNER=1. (Should be F+B).
-        # 2. Sort them or take them in order.
-        # 3. Assign first F to Firms 0..F.
-        # 4. Assign next B to Banks 0..B.
-        # This works perfectly for the physics of the model.
+        # Add to deposits
+        self.estado_hogares[hh_is_firm_owner, Parametros.IDX_HH_DEPOSITS] += (
+            dividends_f[owned_firm_idx]
+        )
 
-        owners_mask = self.estado_hogares[:, self.IDX_HH_IS_OWNER] == 1.0
-        owner_ids = np.where(owners_mask)[0]
+        # 2. Banks
+        bank_liq = self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY]
+        bank_eq = self.estado_bancos[:, Parametros.IDX_BANK_EQUITY]
 
-        # Robustness check
-        if len(owner_ids) >= Parametros.F + Parametros.B:
-            # Assign first F to Firms
-            firm_owner_ids = owner_ids[: Parametros.F]
-            # Assign next B to Banks
-            bank_owner_ids = owner_ids[Parametros.F : Parametros.F + Parametros.B]
+        # Distributable = Positive Equity
+        distributable_b = np.maximum(0, bank_eq)
+        dividends_b = distributable_b * Parametros.DIVIDEND_RATIO
 
-            # Distribute Firm Dividends
-            # We assume firm_owner_ids[i] owns Firm i
-            # dividends_f is shape (F,).
-            self.estado_hogares[firm_owner_ids, self.IDX_HH_DEPOSITS] += dividends_f
+        # Cap at Liquidity
+        dividends_b = np.minimum(dividends_b, bank_liq)
+        dividends_b = np.maximum(0, dividends_b)
 
-            # Distribute Bank Dividends
-            # 2. Banks
-            bank_liq = self.estado_bancos[:, self.IDX_BANK_LIQUIDITY]
-            bank_eq = self.estado_bancos[:, self.IDX_BANK_EQUITY]
-            # Distributable = Positive Equity, paid from Liquidity
-            # But dividend based on Liquidity or Equity? Paper says "20% of profits".
-            # Proxy: Positive Equity change? Or just Equity stock?
-            # Let's use Positive Equity as the base for "Profitability" proxy.
-            distributable_b = np.maximum(0, bank_eq)
-            dividends_b = distributable_b * Parametros.DIVIDEND_RATIO
-            # Cap at Liquidity
-            dividends_b = np.minimum(dividends_b, bank_liq)
-            dividends_b = np.maximum(0, dividends_b)  # Safety
+        # Deduct
+        self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY] -= dividends_b
+        self.estado_bancos[:, Parametros.IDX_BANK_EQUITY] -= dividends_b
 
-            # Deduct
-            self.estado_bancos[:, self.IDX_BANK_LIQUIDITY] -= dividends_b
-            self.estado_bancos[:, self.IDX_BANK_EQUITY] -= dividends_b
+        # Distribute to Owners (Vectorized)
+        # Households with OWNED_TYPE == 2 (Banks)
+        hh_is_bank_owner = self.estado_hogares[:, Parametros.IDX_HH_OWNED_TYPE] == 2
+        owned_bank_idx = self.estado_hogares[
+            hh_is_bank_owner, Parametros.IDX_HH_OWNED_ENTITY_IDX
+        ].astype(int)
 
-            # Pay
-            self.estado_hogares[bank_owner_ids, self.IDX_HH_DEPOSITS] += dividends_b
+        self.estado_hogares[hh_is_bank_owner, Parametros.IDX_HH_DEPOSITS] += (
+            dividends_b[owned_bank_idx]
+        )
 
         # --- C. BANKRUPTCIES & CASCADES ---
 
         # 1. Firm Bankruptcy
         # Liquidity < 0
-        dead_firms_mask = self.estado_firmas[:, self.IDX_FIRM_LIQUIDITY] < 0
+        dead_firms_mask = self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] < 0
         dead_firms_indices = np.where(dead_firms_mask)[0]
 
         if len(dead_firms_indices) > 0:
@@ -863,9 +711,9 @@ class Modelo_CRISIS:
             bank_losses = np.sum(bad_loans, axis=0)  # (B,)
 
             # Deduct from Equity
-            self.estado_bancos[:, self.IDX_BANK_EQUITY] -= bank_losses
+            self.estado_bancos[:, Parametros.IDX_BANK_EQUITY] -= bank_losses
             # Record Bad Debt (Optional)
-            self.estado_bancos[:, self.IDX_BANK_BAD_DEBT] += bank_losses
+            self.estado_bancos[:, Parametros.IDX_BANK_BAD_DEBT] += bank_losses
 
             # Reset Firms
             # Write off debt
@@ -880,20 +728,25 @@ class Modelo_CRISIS:
             )
             init_price = Parametros.WAGE / Parametros.alpha
 
-            self.estado_firmas[dead_firms_indices, self.IDX_FIRM_LIQUIDITY] = init_liq
-            self.estado_firmas[dead_firms_indices, self.IDX_FIRM_EQUITY] = (
-                init_liq  # Equity = Assets
+            self.estado_firmas[dead_firms_indices, Parametros.IDX_FIRM_LIQUIDITY] = (
+                init_liq
             )
-            self.estado_firmas[dead_firms_indices, self.IDX_FIRM_PRICE] = init_price
-            # Reset Production/Workers? Maybe keep capacity but fresh financials.
-            self.estado_firmas[dead_firms_indices, self.IDX_FIRM_LEVERAGE] = 0.0
+            self.estado_firmas[dead_firms_indices, Parametros.IDX_FIRM_EQUITY] = (
+                init_liq
+            )
+            self.estado_firmas[dead_firms_indices, Parametros.IDX_FIRM_PRICE] = (
+                init_price
+            )
+            self.estado_firmas[dead_firms_indices, Parametros.IDX_FIRM_LEVERAGE] = 0.0
+            # Reset Demand to 0 so it re-initializes
+            self.estado_firmas[dead_firms_indices, Parametros.IDX_FIRM_DEMAND] = 0.0
 
         # 2. Bank Default Cascades
         processed_mask = np.zeros(Parametros.B, dtype=bool)
 
         while True:
             # Current dead banks
-            current_equity = self.estado_bancos[:, self.IDX_BANK_EQUITY]
+            current_equity = self.estado_bancos[:, Parametros.IDX_BANK_EQUITY]
             dead_mask = current_equity < 0
 
             # New defaults (Dead AND Not Processed)
@@ -907,13 +760,12 @@ class Modelo_CRISIS:
             for dead_bank in new_default_ids:
                 # This bank defaults.
                 # Its liabilities to others (matriz_interbancaria row) become losses for others.
-                # Row `dead_bank` in matriz_interbancaria = Amounts `dead_bank` OWES to others (Cols).
+                # Row `dead_bank` = Amounts `dead_bank` OWES to others (Cols).
 
                 obligations = self.matriz_interbancaria[dead_bank, :]  # (B,)
 
                 # Others lose this Equity
-                # We can vectorize this subtraction
-                self.estado_bancos[:, self.IDX_BANK_EQUITY] -= obligations
+                self.estado_bancos[:, Parametros.IDX_BANK_EQUITY] -= obligations
 
                 # Record Global Loss
                 loss_val = np.sum(obligations)
@@ -938,21 +790,24 @@ class Modelo_CRISIS:
                 size=n_dead_b,
             )
 
-            self.estado_bancos[all_dead_ids, self.IDX_BANK_TOTAL_ASSETS] = init_assets
-            self.estado_bancos[all_dead_ids, self.IDX_BANK_EQUITY] = (
+            self.estado_bancos[all_dead_ids, Parametros.IDX_BANK_TOTAL_ASSETS] = (
+                init_assets
+            )
+            self.estado_bancos[all_dead_ids, Parametros.IDX_BANK_EQUITY] = (
                 init_assets * Parametros.INIT_CAPITAL_RATIO
             )
-            self.estado_bancos[all_dead_ids, self.IDX_BANK_LIQUIDITY] = init_assets
-            self.estado_bancos[all_dead_ids, self.IDX_BANK_DEPOSITS] = init_assets * (
-                1 - Parametros.INIT_CAPITAL_RATIO
+            self.estado_bancos[all_dead_ids, Parametros.IDX_BANK_LIQUIDITY] = (
+                init_assets
             )
-            self.estado_bancos[all_dead_ids, self.IDX_BANK_BAD_DEBT] = 0.0
+            self.estado_bancos[all_dead_ids, Parametros.IDX_BANK_DEPOSITS] = (
+                init_assets * (1 - Parametros.INIT_CAPITAL_RATIO)
+            )
+            self.estado_bancos[all_dead_ids, Parametros.IDX_BANK_BAD_DEBT] = 0.0
 
             # Clear Connections (Lending side)
             # We already cleared Borrowing side (Rows).
             # Now clear Lending side (Cols). Dead banks cannot claim assets.
-            # Actually, if they defaulted, their assets (loans to others) might still exist?
-            # Usually in simple ABMs, the agent is replaced. New agent has 0 links.
+            # (Strictly speaking, liquidation value > 0, but simplified to 0 here for worst-case)
             self.matriz_interbancaria[:, all_dead_ids] = 0.0
             self.matriz_credito_firmas[:, all_dead_ids] = 0.0  # Clear firm loans too
 
@@ -963,7 +818,7 @@ class Modelo_CRISIS:
         self.current_step_loss = 0.0
         self.current_step_defaults = 0
 
-        # Run Phases (Currently No-Op)
+        # Run Phases
         self.paso_planificacion_firmas()
         self.paso_mercado_bancario()
         self.paso_economia_real()
