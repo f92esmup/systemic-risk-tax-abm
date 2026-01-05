@@ -17,18 +17,22 @@ class Params:
     alpha = 0.1  # Labor productivity
 
     # Consumption
-    c = 0.8  # Marginal propensity to consume (High velocity!)
+    c = 0.8  # Marginal propensity to consume
     Z_CONSUMPTION = 2  # Number of firms sampled by households (z)
 
     # Banking & Credit
-    r_bar = 0.02  # Central bank baseline interest rate
+    R_BAR = 0.02  # Central bank baseline interest rate (r_bar)
     N_SEARCH = 5  # Number of banks a firm searches for credit (n)
+    
+    # Interest Rate Mechanism (Appendix A)
+    CHI_RANGE = (0.0, 1.0)  # Bank specificity for firm loans
+    PSI_RANGE = (0.0, 0.1)  # Bank specificity for interbank loans
+    K_mu = 10.0             # Slope for hyperbolic tangent function
 
     # Debt & Regulation
     DEBT_REPAYMENT_RATE = 0.05  # Rate of debt reimbursement (tau)
 
-    # Note: 'phi' in paper is "Credit demand contraction" = 0.8.
-    # It is NOT capital adequacy. We use a separate constant for init if needed.
+    # Credit demand contraction (phi)
     PHI_DEMAND_CONTRACTION = 0.8
 
     # Dividends
@@ -37,22 +41,18 @@ class Params:
     # Taxes
     TAX_TOBIN_RATE = 0.002  # 0.2%
     TAX_SRT_ZETA = 0.02  # Sensitivity for SRT (Main text uses 0.02)
-    # TAX_SRT_ZETA = 1.0   # Use this for "Appendix B" strong mode
 
-    # --- Algorithm / Simulation parameters (Not in Table I but required) ---
+    # --- Algorithm / Simulation parameters ---
 
-    # Price adjustment (Equation logic)
+    # Price adjustment
     PRICE_ADJUSTMENT_SPEED = 0.05
     PRICE_DRIFT_STD = 0.01
 
     # Initialization Distributions
-    # To fix "Empty Volume", agents must start with LESS cash relative to needs.
-    # If Liquidity is high, they don't borrow.
-    # We set initial assets to be moderate.
     INIT_BANK_ASSETS = (1000, 3000)
     INIT_FIRM_ASSETS = (5, 15)  # Firms start small
 
-    # Capital Adequacy for Initialization (Not phi from Table I, but standard Basel)
+    # Capital Adequacy for Initialization
     INIT_CAPITAL_RATIO = 0.10  # 10% Equity initially
 
     @classmethod
