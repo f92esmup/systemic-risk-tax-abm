@@ -49,9 +49,10 @@ def run_batch(mode, param, n_runs=10, n_steps=200):
 
 
 def main():
-    # Parámetros de ejecución (Reducidos para demostración rápida, aumentar para papers)
-    N_RUNS = 100
-    STEPS = 500
+    # Parámetros de ejecución
+    # Ajustar según necesidad de velocidad vs precisión
+    N_RUNS = 2  # Reducido para testing rápido
+    STEPS = 50
 
     # 1. Ejecutar Escenarios
     data_none = run_batch("none", 0.0, N_RUNS, STEPS)
@@ -63,22 +64,24 @@ def main():
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
     # A. Pérdidas (Log Scale)
-    sns.kdeplot(
-        data_none["losses"],
-        ax=axes[0],
-        label="No Tax",
-        fill=True,
-        log_scale=(True, False),
-        color="red",
-    )
-    sns.kdeplot(
-        data_srt["losses"],
-        ax=axes[0],
-        label="SRT",
-        fill=True,
-        log_scale=(True, False),
-        color="green",
-    )
+    if len(data_none["losses"]) > 0:
+        sns.kdeplot(
+            data_none["losses"],
+            ax=axes[0],
+            label="No Tax",
+            fill=True,
+            log_scale=(True, False),
+            color="red",
+        )
+    if len(data_srt["losses"]) > 0:
+        sns.kdeplot(
+            data_srt["losses"],
+            ax=axes[0],
+            label="SRT",
+            fill=True,
+            log_scale=(True, False),
+            color="green",
+        )
     axes[0].set_title("Distribución de Pérdidas (L)")
     axes[0].legend()
 
@@ -119,4 +122,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
