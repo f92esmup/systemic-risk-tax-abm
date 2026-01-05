@@ -1,6 +1,5 @@
 import numpy as np
 import glob
-import os
 
 print("Checking 'none' mode data...")
 files = sorted(glob.glob("output_data/none/*.npz"))
@@ -11,14 +10,14 @@ else:
     print(f"Inspecting {f}")
     try:
         d = np.load(f)
-        if 'L_bb' not in d:
-             print("Key 'L_bb' NOT in data!")
+        if "L_bb" not in d:
+            print("Key 'L_bb' NOT in data!")
         else:
-            L_bb = d['L_bb']
+            L_bb = d["L_bb"]
             print(f"L_bb shape: {L_bb.shape}")
             print(f"L_bb (last step) max: {L_bb[-1].max()}")
             print(f"L_bb (last step) sum: {L_bb[-1].sum()}")
-            
+
             # Check non-zeros
             nz = np.count_nonzero(L_bb[-1])
             print(f"Non-zero elements in last step: {nz}")
