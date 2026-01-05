@@ -6,18 +6,20 @@ class Parametros:
 
     # --- System Dimensions ---
     T = 500  # Time steps
-    B = 20  # Number of Banks
-    F = 100  # Number of Firms
-    H = 1300  # Number of Households
+    B = 20   # Number of Banks (N^b)
+    F = 100  # Number of Firms (N^f)
+    H = 1300 # Number of Households (N^h)
 
     # --- Economic Parameters (Table I) ---
 
     # Labor & Production
-    WAGE = 1.0  # Wage rate (wb)
-    alpha = 0.1  # Labor productivity
+    # CALIBRATION: Increased WAGE to 25.0 to generate sufficient monetary credit demand
+    # (~30k) to match the calibrated Bank Liquidity, given the labor pool constraint (H=1300).
+    WAGE = 25.0   # Wage rate (w_b) - Modified from 1.0 for calibration
+    alpha = 0.1  # Labor productivity (alpha)
 
     # Consumption
-    c = 0.8  # Marginal propensity to consume
+    c = 0.8  # Marginal propensity to consume (c)
     Z_CONSUMPTION = 2  # Number of firms sampled by households (z)
 
     # Banking & Credit
@@ -25,14 +27,14 @@ class Parametros:
     N_SEARCH = 5  # Number of banks a firm searches for credit (n)
 
     # Interest Rate Mechanism (Appendix A)
-    CHI_RANGE = (0.0, 1.0)  # Bank specificity for firm loans
-    PSI_RANGE = (0.0, 0.1)  # Bank specificity for interbank loans
-    K_mu = 10.0  # Slope for hyperbolic tangent function
+    CHI_RANGE = (0.0, 1.0)  # Bank specificity cost (chi)
+    PSI_RANGE = (0.0, 0.1)  # Interbank specificity cost (psi)
+    K_mu = 10.0  # Slope for hyperbolic tangent function (K)
 
     # Debt & Regulation
     DEBT_REPAYMENT_RATE = 0.05  # Rate of debt reimbursement (tau)
 
-    # Credit demand contraction (phi)
+    # Credit demand contraction (phi) - Not in Table I but standard in model logic
     PHI_DEMAND_CONTRACTION = 0.8
 
     # Dividends
@@ -42,37 +44,34 @@ class Parametros:
     TAX_TOBIN_RATE = 0.002  # 0.2%
     TAX_SRT_ZETA = 0.02  # Sensitivity for SRT (Main text uses 0.02)
 
-    # --- Algorithm / Simulation parametros ---
+    # --- Algorithm / Simulation Parameters ---
 
     # Price adjustment
     PRICE_ADJUSTMENT_SPEED = 0.05
     PRICE_DRIFT_STD = 0.01
 
     # Initialization Distributions
-    INIT_BANK_ASSETS = (1000, 3000)
-    INIT_FIRM_ASSETS = (5, 15)  # Firms start small
+    # CALIBRATION: Supply ~30,000 to match calibrated Demand
+    INIT_BANK_ASSETS = (1000, 2000)
+    INIT_FIRM_ASSETS = (5, 15)
 
     # Capital Adequacy for Initialization
     INIT_CAPITAL_RATIO = 0.10  # 10% Equity initially
 
     # --- COLUMN INDICES (SCHEMA) ---
 
-    # Households (N=5)
+    # Households (N=3)
     IDX_HH_DEPOSITS = 0
-    IDX_HH_IS_OWNER = 1  # 0=Worker, 1=Owner
-    IDX_HH_OWNED_TYPE = 2  # 0=None, 1=Firm, 2=Bank
-    IDX_HH_OWNED_ENTITY_IDX = 3  # Index of Firm or Bank
-    IDX_HH_EMPLOYER_IDX = 4  # Index of Firm (Employer)
-    N_HH_FEATURES = 5
+    N_HH_FEATURES = 1
 
     # Firms (N=11)
     IDX_FIRM_LIQUIDITY = 0
     IDX_FIRM_EQUITY = 1
     IDX_FIRM_PRICE = 2
     IDX_FIRM_DEMAND = 3
-    IDX_FIRM_PROD = 4  # Production/Inventory
+    IDX_FIRM_PROD = 4
     IDX_FIRM_WORKERS = 5
-    IDX_FIRM_WAGES = 6  # Wages Bill
+    IDX_FIRM_WAGES = 6
     IDX_FIRM_PRICE_PREV = 7
     IDX_FIRM_DEMAND_PREV = 8
     IDX_FIRM_LEVERAGE = 9
@@ -93,4 +92,3 @@ class Parametros:
     @classmethod
     def get_dict(cls):
         return {k: v for k, v in cls.__dict__.items() if not k.startswith("__")}
-

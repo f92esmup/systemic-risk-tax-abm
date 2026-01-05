@@ -1,124 +1,157 @@
+import sys
+import os
+import argparse
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 from tqdm import tqdm
+
 from simulacion import Modelo_CRISIS
 from parametros import Parametros
-import os
+import visualizacion
+import analisis
 
-# Configuración de Estilo
-sns.set_theme(style="whitegrid")
+# --- CONFIGURATION ---
+DEFAULT_STEPS_DEMO = 60
+DEFAULT_STEPS_PAPER = 200
+DEFAULT_RUNS_PAPER = 50
 
 
-def run_batch(mode, param, n_runs=10, n_steps=200):
-    """Ejecuta un lote de simulaciones y guarda resultados."""
-    print(f"\n>>> Iniciando Experimento: Modo={mode.upper()}, Parámetro={param}")
+def run_simulation_single(mode, param, steps, run_id, output_folder, save_disk=True):
+    """
+    Runs a single simulation.
+    Returns: (model instance, metrics_dict)
+    """
+    model = Modelo_CRISIS(seed=2000 + run_id, tax_mode=mode, tax_param=param)
 
-    all_losses = []
-    all_cascades = []
-    all_volumes = []
+    losses = []
+    defaults = []
+    volumes = []
 
-    output_folder = f"output_data/{mode}"
-    os.makedirs(output_folder, exist_ok=True)
+    for t in range(steps):
+        model.ejecutar_paso()
 
-    for r in tqdm(range(n_runs), desc=f"Simulando {mode}"):
-        model = Modelo_CRISIS(seed=2000 + r, tax_mode=mode, tax_param=param)
+        # Metrics for Figure 4
+        if model.current_step_loss > 0:
+            losses.append(model.current_step_loss)
+        if model.current_step_defaults > 0:
+            defaults.append(model.current_step_defaults)
+        volumes.append(model.current_step_volume)
 
-        run_volumes = []
-        for t in range(n_steps):
-            model.ejecutar_paso()
+    if save_disk:
+        os.makedirs(output_folder, exist_ok=True)
+        model.guardar_simulacion_disco(run_id=run_id, folder=output_folder)
 
-            # Recolectar métricas del paso
-            if model.current_step_loss > 0:
-                all_losses.append(model.current_step_loss)
-            if model.current_step_defaults > 0:
-                all_cascades.append(model.current_step_defaults)
-
-            run_volumes.append(model.current_step_volume)
-
-        all_volumes.append(np.mean(run_volumes))
-
-        # Guardar snapshot completo a disco
-        model.guardar_simulacion_disco(run_id=r, folder=output_folder)
-
-    return {
-        "losses": np.array(all_losses),
-        "cascades": np.array(all_cascades),
-        "volumes": np.array(all_volumes),
+    metrics = {
+        "losses": np.array(losses),
+        "cascades": np.array(defaults),
+        "mean_volume": np.mean(volumes) if volumes else 0.0,
+        "volumes_ts": np.array(volumes),
     }
+
+    return model, metrics
+
+
+def run_mode_single_demo():
+    """
+    Mode: SINGLE_DEMO
+    Runs 1 simulation and generates network graphs.
+    """
+    print("\n>>> MODE: SINGLE_DEMO <<<\n")
+    mode = "srt"  # Use SRT to show the full mechanism
+    param = Parametros.TAX_SRT_ZETA
+    folder = "output_data/demo"
+
+    print(f"Running 1 simulation (Mode: {mode}, Steps: {DEFAULT_STEPS_DEMO})...")
+    model, _ = run_simulation_single(
+        mode, param, DEFAULT_STEPS_DEMO, run_id=0, output_folder=folder
+    )
+
+    print("Generating Network Graphs...")
+    steps_to_plot = [20, 40, 50]
+    for s in steps_to_plot:
+        if s < DEFAULT_STEPS_DEMO:
+            visualizacion.generar_grafo_multicapa(run_id=0, step=s, folder=folder)
+
+    print(f"\nDemo complete. Data saved to {folder}/\n")
+    print(f"Graphs saved in {os.getcwd()}")
+
+
+def run_mode_paper_replication():
+    """
+    Mode: PAPER_REPLICATION
+    Runs batch simulations and generates Figure 3 & 4.
+    """
+    print("\n>>> MODE: PAPER_REPLICATION <<<\n")
+    print(
+        f"Configuration: {DEFAULT_RUNS_PAPER} runs per scenario, {DEFAULT_STEPS_PAPER} steps."
+    )
+
+    scenarios = [
+        ("none", 0.0),
+        ("tobin", Parametros.TAX_TOBIN_RATE),
+        ("srt", Parametros.TAX_SRT_ZETA),
+    ]
+
+    results_for_fig4 = {}  # Store aggregated data
+
+    for mode, param in scenarios:
+        print(f"\n--- Scenario: {mode.upper()} ---")
+        output_folder = f"output_data/{mode}"
+
+        # Aggregators
+        all_losses = []
+        all_cascades = []
+        all_avg_volumes = []
+
+        for r in tqdm(range(DEFAULT_RUNS_PAPER), desc=f"Simulating {mode}"):
+            _, metrics = run_simulation_single(
+                mode, param, DEFAULT_STEPS_PAPER, run_id=r, output_folder=output_folder
+            )
+
+            if len(metrics["losses"]) > 0:
+                all_losses.extend(metrics["losses"])
+            if len(metrics["cascades"]) > 0:
+                all_cascades.extend(metrics["cascades"])
+            all_avg_volumes.append(metrics["mean_volume"])
+
+        results_for_fig4[mode] = {
+            "losses": np.array(all_losses),
+            "cascades": np.array(all_cascades),
+            "volumes": np.array(all_avg_volumes),
+        }
+
+    print("\n>>> Simulations Complete. Starting Analysis... <<<")
+
+    # Generate Figure 3 (Reads from disk)
+    analisis.generar_figura_3()
+
+    # Generate Figure 4 (Uses memory data)
+    analisis.generar_figura_4(results_for_fig4)
+
+    print(
+        "\nReplication complete. Figures 3 and 4 saved in output_data/graficas_finales."
+    )
 
 
 def main():
-    # Parámetros de ejecución
-    # Ajustar según necesidad de velocidad vs precisión
-    N_RUNS = 100  # Reducido para testing rápido
-    STEPS = 500
-
-    # 1. Ejecutar Escenarios
-    data_none = run_batch("none", 0.0, N_RUNS, STEPS)
-    data_tobin = run_batch("tobin", 0.002, N_RUNS, STEPS)
-    data_srt = run_batch("srt", 0.02, N_RUNS, STEPS)
-
-    # 2. Generar Figura 4 (Distribuciones)
-    print("\nGenerando Figura 4: Comparativa de Riesgo Sistémico...")
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-
-    # A. Pérdidas (Log Scale)
-    if len(data_none["losses"]) > 0:
-        sns.kdeplot(
-            data_none["losses"],
-            ax=axes[0],
-            label="No Tax",
-            fill=True,
-            log_scale=(True, False),
-            color="red",
-        )
-    if len(data_srt["losses"]) > 0:
-        sns.kdeplot(
-            data_srt["losses"],
-            ax=axes[0],
-            label="SRT",
-            fill=True,
-            log_scale=(True, False),
-            color="green",
-        )
-    axes[0].set_title("Distribución de Pérdidas (L)")
-    axes[0].legend()
-
-    # B. Cascadas
-    bins = np.arange(1, Parametros.B + 2)
-    axes[1].hist(
-        data_none["cascades"],
-        bins=bins,
-        alpha=0.5,
-        label="No Tax",
-        color="red",
-        density=True,
+    parser = argparse.ArgumentParser(
+        description="Antigravity Systemic Risk Model - Main Execution Script"
     )
-    axes[1].hist(
-        data_srt["cascades"],
-        bins=bins,
-        alpha=0.5,
-        label="SRT",
-        color="green",
-        density=True,
+    parser.add_argument(
+        "--mode",
+        choices=["SINGLE_DEMO", "PAPER_REPLICATION"],
+        default="SINGLE_DEMO",
+        help="Execution mode: SINGLE_DEMO (fast, visualization) or PAPER_REPLICATION (batch, stats)",
     )
-    axes[1].set_title("Tamaño de Cascadas (C)")
-    axes[1].set_xlabel("Nº de Bancos en Default")
-    axes[1].legend()
 
-    # C. Volumen
-    sns.boxplot(
-        data=[data_none["volumes"], data_tobin["volumes"], data_srt["volumes"]],
-        ax=axes[2],
-    )
-    axes[2].set_xticklabels(["No Tax", "Tobin", "SRT"])
-    axes[2].set_title("Volumen del Mercado Interbancario (V)")
+    args = parser.parse_args()
 
-    plt.tight_layout()
-    plt.savefig("figura4_resultados.png", dpi=300)
-    print("Métricas guardadas en 'figura4_resultados.png'")
+    if args.mode == "SINGLE_DEMO":
+        run_mode_single_demo()
+    elif args.mode == "PAPER_REPLICATION":
+        run_mode_paper_replication()
 
 
 if __name__ == "__main__":
     main()
+
+
