@@ -392,6 +392,7 @@ class Modelo_CRISIS:
         # print(f"DEBUG [Step]: Deficit Banks: {len(deficit_ids)}, Surplus Banks: {len(surplus_ids)}")
 
         total_taxes = 0.0
+        bank_refinancing_costs = np.zeros(Parametros.B)
 
         if len(deficit_ids) > 0 and len(surplus_ids) > 0:
             n_def = len(deficit_ids)
@@ -493,6 +494,10 @@ class Modelo_CRISIS:
                     self.estado_bancos[d, Parametros.IDX_BANK_EQUITY] -= actual_tax
                     total_taxes += actual_tax
 
+                # Track refinancing costs (Interest + Tax) for pass-through
+                interest_cost = amount * rate_new
+                bank_refinancing_costs[d] += (interest_cost + actual_tax)
+
                 dyn_gaps[d] -= amount
                 dyn_gaps[s] += amount
 
@@ -523,6 +528,18 @@ class Modelo_CRISIS:
         # rates was calculated as (F, N_SEARCH). We need to pick the rates corresponding to chosen_bank_ids
         # best_choice_local_idx (F,) tells us which of the N_SEARCH columns was picked
         new_rates_chosen = rates[np.arange(Parametros.F), best_choice_local_idx]
+
+        # --- APPLY REFINANCING COSTS (Pass-through) ---
+        # Calculate markup per bank: Total Refinancing Cost / Total New Credit Extended
+        total_new_credit_per_bank = np.zeros(Parametros.B)
+        np.add.at(total_new_credit_per_bank, chosen_bank_ids, approved_amounts)
+
+        bank_markups = np.zeros(Parametros.B)
+        mask_lending = total_new_credit_per_bank > 1e-9
+        bank_markups[mask_lending] = bank_refinancing_costs[mask_lending] / total_new_credit_per_bank[mask_lending]
+
+        # Add markup to the rates chosen by firms
+        new_rates_chosen += bank_markups[chosen_bank_ids]
         
         # Weighted Average
         total_new_debt = old_debt + approved_amounts
