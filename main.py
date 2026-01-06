@@ -1,12 +1,9 @@
-import sys
 import os
-import argparse
 import numpy as np
 from tqdm import tqdm
 
 from simulacion import Modelo_CRISIS
 from parametros import Parametros
-import visualizacion
 import analisis
 
 # --- CONFIGURATION ---
@@ -26,7 +23,7 @@ def run_simulation_single(mode, param, steps, run_id, output_folder, save_disk=T
     defaults = []
     volumes = []
 
-    for t in range(steps):
+    for _ in range(steps):
         model.ejecutar_paso()
 
         # Metrics for Figure 4

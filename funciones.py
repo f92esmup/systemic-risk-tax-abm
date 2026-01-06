@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def calcular_debtrank(L, C, v, initial_distress=None, steps=100):
+def calcular_debtrank(L, C, v, steps=100):
     """
     Calculate DebtRank for each node in a financial network.
     Supports both single matrix (B, B) and batch of matrices (K, B, B).
@@ -10,7 +10,6 @@ def calcular_debtrank(L, C, v, initial_distress=None, steps=100):
         L: Liability tensor. Shape (B, B) or (Batch, B, B). Rows=Borrowers.
         C: Capital/Equity. Shape (B,) or (Batch, B).
         v: Economic Value. Shape (B,). (Used for weighting R).
-        initial_distress (optional): Shape compatible with batch.
         steps: Max iterations.
 
     Returns:
@@ -23,7 +22,7 @@ def calcular_debtrank(L, C, v, initial_distress=None, steps=100):
     else:
         single_mode = False
 
-    K, B, _ = L.shape
+    K, _, _ = L.shape
 
     if C.ndim == 1:
         C = np.tile(C, (K, 1))

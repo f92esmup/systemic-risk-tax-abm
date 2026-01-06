@@ -22,7 +22,7 @@ class Modelo_CRISIS:
         self.current_step_loss = 0.0
         self.current_step_defaults = 0
         self.current_step_volume = 0.0
-        self.current_firm_credit_demand = None # Will be set in planning phase
+        self.current_firm_credit_demand = np.zeros(Parametros.F, dtype=np.float64)
 
         self.reset()
 
@@ -344,10 +344,6 @@ class Modelo_CRISIS:
         bank_credit_demand = np.zeros(Parametros.B)
         np.add.at(bank_credit_demand, chosen_bank_ids, self.current_firm_credit_demand)
 
-        # --- DEBUG: Firm Credit Demand ---
-        total_firm_demand = np.sum(self.current_firm_credit_demand)
-        # print(f"DEBUG [Step]: Total Firm Credit Demand: {total_firm_demand:.2f}")
-
         # --- PART B: INTERBANK MARKET & SRT ---
 
         bank_liquidity = self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY]
@@ -482,7 +478,6 @@ class Modelo_CRISIS:
         # --- A. PRODUCTION & WAGES ---
 
         # 1. Production
-        workers = self.estado_firmas[:, Parametros.IDX_FIRM_WORKERS]
         # (Assuming perishable goods or instant conversion, kept simple as before)
 
         # 2. Wage Payment

@@ -13,9 +13,8 @@ class Parametros:
     # --- Economic Parameters (Table I) ---
 
     # Labor & Production
-    # CALIBRATION: Increased WAGE to 25.0 to generate sufficient monetary credit demand
-    # (~30k) to match the calibrated Bank Liquidity, given the labor pool constraint (H=1300).
-    WAGE = 25.0   # Wage rate (w_b) - Modified from 1.0 for calibration
+    # CALIBRATION: Matches Table I in Poledna & Thurner (2016)
+    WAGE = 1.0   # Wage rate (w_b)
     alpha = 0.1  # Labor productivity (alpha)
 
     # Consumption
