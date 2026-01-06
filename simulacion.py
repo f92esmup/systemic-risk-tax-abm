@@ -492,6 +492,7 @@ class Modelo_CRISIS:
 
                 if actual_tax > 0:
                     self.estado_bancos[d, Parametros.IDX_BANK_EQUITY] -= actual_tax
+                    self.estado_bancos[d, Parametros.IDX_BANK_LIQUIDITY] -= actual_tax
                     total_taxes += actual_tax
 
                 # Track refinancing costs (Interest + Tax) for pass-through
