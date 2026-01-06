@@ -22,7 +22,7 @@ def calcular_debtrank(L, C, v, steps=100):
     else:
         single_mode = False
 
-    K, _, _ = L.shape
+    K, B, _ = L.shape
 
     if C.ndim == 1:
         C = np.tile(C, (K, 1))
@@ -79,8 +79,6 @@ def calcular_impuesto_srt(
     N_props = len(proposed_amounts)
     if N_props == 0:
         return np.array([])
-
-    B = L_current.shape[0]
 
     # 1. Baseline Systemic Loss
     R_base = calcular_debtrank(L_current, C, v)

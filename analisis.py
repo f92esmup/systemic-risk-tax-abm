@@ -173,7 +173,7 @@ def generar_figura_3(output_folder_base="output_data"):
     plt.close()
 
     # --- PLOT 3B: Marginal Contribution vs Size ---
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5), sharey=True, sharex=True)
+    _, axes = plt.subplots(1, 3, figsize=(18, 5), sharey=True, sharex=True)
 
     for i, mode in enumerate(modes):
         ax = axes[i]
@@ -213,7 +213,7 @@ def generar_figura_4(results_dict):
     colors = {"none": "red", "tobin": "blue", "srt": "green"}
     labels = {"none": "No Tax", "tobin": "Tobin Tax", "srt": "SRT"}
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    _, axes = plt.subplots(1, 3, figsize=(18, 5))
 
     # --- 4A: Losses Distribution (KDE) ---
     ax_loss = axes[0]
