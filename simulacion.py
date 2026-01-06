@@ -465,6 +465,41 @@ class Modelo_CRISIS:
                 if amount < 1e-9:
                     continue
 
+                # --- SEQUENTIAL TAX CALCULATION (Fix: Update network state per transaction) ---
+                actual_tax = 0.0
+
+                if self.tax_mode == "srt" and self.tax_param > 0:
+                    # Use CURRENT state (before adding this loan) for marginal risk
+                    curr_L = self.matriz_interbancaria
+                    curr_E = self.estado_bancos[:, Parametros.IDX_BANK_EQUITY]
+                    curr_v = np.sum(curr_L, axis=1) # Total interbank liabilities
+                    
+                    # Update leverage & p_default based on current state
+                    curr_deposits = self.estado_bancos[:, Parametros.IDX_BANK_DEPOSITS]
+                    curr_leverage = (curr_deposits + curr_v) / (curr_E + 1e-9)
+                    curr_p_default = Parametros.DEFAULT_PROB_SCALING * fn.calcular_fragilidad_financiera(
+                        curr_leverage, Parametros.K_mu
+                    )
+                    
+                    # Calculate tax for this SPECIFIC transaction
+                    # indices: (1, 2), amount: (1,)
+                    prop_indices = np.array([[d, s]], dtype=int)
+                    prop_amounts = np.array([amount])
+                    
+                    tax_res = fn.calcular_impuesto_srt(
+                        curr_L, prop_indices, prop_amounts,
+                        curr_E, curr_v, curr_p_default, self.tax_param
+                    )
+                    if len(tax_res) > 0:
+                        actual_tax = tax_res[0]
+
+                elif self.tax_mode == "tobin":
+                    # Tobin is linear, so scaling pre-calc is fine (and faster)
+                    pre_amt = potential_amounts[idx]
+                    pre_tax = taxes[idx]
+                    if pre_amt > 1e-9:
+                        actual_tax = pre_tax * (amount / pre_amt)
+
                 self.matriz_interbancaria[d, s] += amount
                 self.current_step_volume += amount
 
@@ -483,12 +518,6 @@ class Modelo_CRISIS:
 
                 self.estado_bancos[d, Parametros.IDX_BANK_LIQUIDITY] += amount
                 self.estado_bancos[s, Parametros.IDX_BANK_LIQUIDITY] -= amount
-
-                pre_amt = potential_amounts[idx]
-                pre_tax = taxes[idx]
-                actual_tax = 0.0
-                if pre_amt > 1e-9:
-                    actual_tax = pre_tax * (amount / pre_amt)
 
                 if actual_tax > 0:
                     self.estado_bancos[d, Parametros.IDX_BANK_EQUITY] -= actual_tax
