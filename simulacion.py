@@ -75,6 +75,9 @@ class Modelo_CRISIS:
         self.estado_firmas[:, Parametros.IDX_FIRM_EQUITY] = init_firm_assets
         self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] = init_firm_assets
 
+        # Households start with zero (receive wages in first step)
+        self.estado_hogares[:, Parametros.IDX_HH_DEPOSITS] = 0.0
+
         # Initialize Price to Marginal Cost
         init_price = Parametros.WAGE / Parametros.alpha
         self.estado_firmas[:, Parametros.IDX_FIRM_PRICE] = init_price
@@ -415,7 +418,7 @@ class Modelo_CRISIS:
 
             if self.tax_mode == "srt" and self.tax_param > 0:
                 v = self.estado_bancos[:, Parametros.IDX_BANK_TOTAL_ASSETS]
-                p_default = 0.01 * fn.calcular_fragilidad_financiera(
+                p_default = Parametros.DEFAULT_PROB_SCALING * fn.calcular_fragilidad_financiera(
                     bank_leverage, Parametros.K_mu
                 )
                 proposed_indices = np.column_stack((d_indices, s_indices))

@@ -33,8 +33,8 @@ class Parametros:
     # Debt & Regulation
     DEBT_REPAYMENT_RATE = 0.05  # Rate of debt reimbursement (tau)
 
-    # Credit demand contraction (phi) - Not in Table I but standard in model logic
-    PHI_DEMAND_CONTRACTION = 0.8
+    # Credit demand contraction (phi)
+    PHI_DEMAND_CONTRACTION = 0.8  # Matches Table I
 
     # Dividends
     DIVIDEND_RATIO = 0.2  # Share of dividends (div)
@@ -43,19 +43,25 @@ class Parametros:
     TAX_TOBIN_RATE = 0.002  # 0.2%
     TAX_SRT_ZETA = 0.02  # Sensitivity for SRT (Main text uses 0.02)
 
+    # Probability of Default Scaling (Appendix A)
+    # p_i(t) = 0.01 * mu(l_i(t))
+    DEFAULT_PROB_SCALING = 0.01
+
     # --- Algorithm / Simulation Parameters ---
 
     # Price adjustment
     PRICE_ADJUSTMENT_SPEED = 0.05
     PRICE_DRIFT_STD = 0.01
 
-    # Initialization Distributions
-    # CALIBRATION: Supply ~30,000 to match calibrated Demand
-    INIT_BANK_ASSETS = (1000, 2000)
-    INIT_FIRM_ASSETS = (5, 15)
+    # Initialization Distributions (Calibrated for B=20, F=100, H=1300)
+    # Total liquidity in system must support wages (H*wb=1300) and IB volume (~40)
+    INIT_BANK_ASSETS = (300, 900)  # Increased to ensure systemic stability
+    INIT_FIRM_ASSETS = (20, 40)  # Enough for initial wages before first sales
 
-    # Capital Adequacy for Initialization
-    INIT_CAPITAL_RATIO = 0.10  # 10% Equity initially
+    # Capital Adequacy for Initialization (Basel III context)
+    INIT_CAPITAL_RATIO = (
+        0.05  # 5% Equity initially as per common ABM setups in the paper series
+    )
 
     # --- COLUMN INDICES (SCHEMA) ---
 

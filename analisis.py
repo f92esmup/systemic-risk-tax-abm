@@ -49,7 +49,7 @@ def calculate_systemic_risk_metrics(L, equity, assets):
     v = assets
     V_total = np.sum(v)
     if V_total == 0:
-        return np.zeros_like(equity), []
+        return np.zeros_like(equity), [], 0.0
 
     R_base = fn.calcular_debtrank(L, equity, v)
 
@@ -83,17 +83,19 @@ def calculate_systemic_risk_metrics(L, equity, assets):
 
         marginals.append((rel_size, delta))
 
-    return R_base, marginals
+    return R_base, marginals, EL_base
 
 
 def generar_figura_3(output_folder_base="output_data"):
     """
     Generates Figure 3 (DebtRank Profiles and Marginal Contributions).
-    Reads .npz files from output_folder_base/{mode}/
+    (b) R_i vs Rank (Bar chart)
+    (d) Relative Delta EL vs Relative Loan Size (Scatter)
     """
     modes = ["none", "tobin", "srt"]
     colors = {"none": "red", "tobin": "blue", "srt": "green"}
     labels = {"none": "No Tax", "tobin": "Tobin Tax", "srt": "SRT"}
+    bar_width = 0.25
 
     data_store = {}
     print("\n>>> Generating Figure 3 (Systemic Risk Profiles) <<<")
@@ -122,8 +124,8 @@ def generar_figura_3(output_folder_base="output_data"):
                     equity = banks[:, 1]
                     assets = banks[:, 7]
 
-                    R, margs = calculate_systemic_risk_metrics(L, equity, assets)
-                    data_store[mode] = {"R": R, "marginals": margs}
+                    R, margs, EL_base = calculate_systemic_risk_metrics(L, equity, assets)
+                    data_store[mode] = {"R": R, "marginals": margs, "EL_base": EL_base}
                     hay_datos = True
                     found_good_run = True
                     print(f" Mode '{mode}': Processed {os.path.basename(f)}")
@@ -139,64 +141,71 @@ def generar_figura_3(output_folder_base="output_data"):
         print(" [!] No valid data found for any mode. Skipping Figure 3.")
         return
 
-    # --- PLOT 3A: DebtRank Profile ---
-    plt.figure(figsize=(10, 6))
+    # Create 1 row, 2 columns
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
 
+    # --- PLOT 3B: DebtRank Profile (Bar Chart) ---
+    ax_bar = axes[0]
+    
     # Base ordering (No Tax) for x-axis
     if "none" in data_store:
-        rank_indices = np.argsort(data_store["none"]["R"])[::-1]
+        base_R = data_store["none"]["R"]
+        rank_indices = np.argsort(base_R)[::-1]
     else:
-        # Fallback if 'none' is missing
         available_keys = list(data_store.keys())
         rank_indices = np.argsort(data_store[available_keys[0]]["R"])[::-1]
 
-    x_axis = np.arange(1, Parametros.B + 1)
+    # X positions
+    x = np.arange(len(rank_indices))
 
+    # Plot bars
+    offsets = {"none": -bar_width, "tobin": 0, "srt": bar_width}
+    
     for mode in modes:
         if mode in data_store:
             R = data_store[mode]["R"]
-            plt.plot(
-                x_axis,
-                R[rank_indices],
-                marker="o",
-                label=labels[mode],
-                color=colors[mode],
-                alpha=0.8,
-            )
+            # Reorder R based on the 'none' ranking
+            R_sorted = R[rank_indices]
+            
+            ax_bar.bar(x + offsets[mode], R_sorted, width=bar_width, label=labels[mode], color=colors[mode], alpha=0.7)
 
-    plt.xlabel("Banks (Sorted by Risk)")
-    plt.ylabel("DebtRank")
-    plt.title("Systemic Risk Profile (DebtRank)")
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.savefig("output_data/graficas_finales/figura3_ab_debtrank.png")
-    plt.close()
+    ax_bar.set_xlabel("Banks (Sorted by Risk in 'No Tax')")
+    ax_bar.set_ylabel("DebtRank ($R_i$)")
+    ax_bar.set_title("(b) Model results for $R_i$")
+    ax_bar.set_xticks(x)
+    ax_bar.set_xticklabels(x + 1) # 1-based indexing for display
+    ax_bar.legend()
+    ax_bar.grid(True, axis='y', alpha=0.3)
 
-    # --- PLOT 3B: Marginal Contribution vs Size ---
-    _, axes = plt.subplots(1, 3, figsize=(18, 5), sharey=True, sharex=True)
-
-    for i, mode in enumerate(modes):
-        ax = axes[i]
+    # --- PLOT 3D: Marginal Contributions (Scatter) ---
+    ax_scat = axes[1]
+    
+    for mode in modes:
         if mode in data_store:
             margs = data_store[mode]["marginals"]
-            if margs:
-                loans, deltas = zip(*margs)
-                ax.scatter(loans, deltas, color=colors[mode], alpha=0.6, s=15)
-                ax.set_xscale("log")
-                ax.set_yscale("log")
-                ax.set_title(f"{labels[mode]} (n={len(loans)})")
+            EL_base = data_store[mode]["EL_base"]
+            
+            if margs and EL_base > 0:
+                loans_rel, deltas = zip(*margs)
+                
+                # Convert to percentages
+                x_pct = np.array(loans_rel) * 100
+                y_pct = (np.array(deltas) / EL_base) * 100
+                
+                ax_scat.scatter(x_pct, y_pct, color=colors[mode], alpha=0.6, s=20, label=labels[mode])
             else:
-                ax.text(
-                    0.5, 0.5, "No Active Loans", ha="center", transform=ax.transAxes
-                )
-        else:
-            ax.text(0.5, 0.5, "No Data", ha="center", transform=ax.transAxes)
+                pass # No data or EL_base 0
 
-    axes[0].set_ylabel("Marginal Contribution (Delta EL)")
-    axes[1].set_xlabel("Relative Loan Size (Log Scale)")
+    ax_scat.set_xlabel("Relative Loan Size [%] ($L_{ij} / E_j$)")
+    ax_scat.set_ylabel("Relative Increment EL sys [%]")
+    ax_scat.set_title("(d) Marginal contributions")
+    ax_scat.set_xscale("log")
+    ax_scat.set_yscale("log")
+    ax_scat.legend()
+    ax_scat.grid(True, which="both", alpha=0.2)
 
     plt.tight_layout()
-    plt.savefig("output_data/graficas_finales/figura3_cd_marginal.png")
+    plt.savefig("output_data/graficas_finales/figura3_combined.png", dpi=150)
     plt.close()
     print(">>> Figure 3 saved in output_data/graficas_finales/")
 
@@ -204,7 +213,9 @@ def generar_figura_3(output_folder_base="output_data"):
 def generar_figura_4(results_dict):
     """
     Generates Figure 4 (Distributions of Loss, Cascades, Volume).
-    results_dict format: {'mode': {'losses': [], 'cascades': [], 'volumes': []}}
+    (a) Distribution of total losses L
+    (b) Distribution of cascade sizes C
+    (c) Distribution of total transaction volume V
     """
     print("\n>>> Generating Figure 4 (Comparative Distributions) <<<")
     os.makedirs("output_data/graficas_finales", exist_ok=True)
@@ -213,70 +224,84 @@ def generar_figura_4(results_dict):
     colors = {"none": "red", "tobin": "blue", "srt": "green"}
     labels = {"none": "No Tax", "tobin": "Tobin Tax", "srt": "SRT"}
 
-    _, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig, axes = plt.subplots(1, 3, figsize=(20, 6))
 
-    # --- 4A: Losses Distribution (KDE) ---
+    # Helper function to prepare data for side-by-side (dodged) histograms
+    def prepare_hist_data(metric_key):
+        data = []
+        lbls = []
+        cols = []
+        for mode in modes:
+            if mode in results_dict and len(results_dict[mode][metric_key]) > 0:
+                data.append(results_dict[mode][metric_key])
+                lbls.append(labels[mode])
+                cols.append(colors[mode])
+        return data, lbls, cols
+
+    # --- 4A: Losses Distribution L ---
     ax_loss = axes[0]
-    has_loss_data = False
-    for mode in modes:
-        if mode in results_dict and len(results_dict[mode]["losses"]) > 1:
-            try:
-                sns.kdeplot(
-                    results_dict[mode]["losses"],
-                    ax=ax_loss,
-                    label=labels[mode],
-                    fill=True,
-                    log_scale=(True, False),  # Log x-axis for losses
-                    color=colors[mode],
-                    warn_singular=False,
-                )
-                has_loss_data = True
-            except Exception as e:
-                print(f" [WARN] Could not plot KDE for {mode}: {e}")
+    data_L, lbls_L, cols_L = prepare_hist_data("losses")
+    
+    if data_L:
+        ax_loss.hist(
+            data_L,
+            bins=20,
+            label=lbls_L,
+            color=cols_L,
+            density=True,
+            histtype='bar',  # Side-by-side bars
+            log=True         # Log scale for y-axis
+        )
+        
+    ax_loss.set_title("(a) Distribution of total losses $L$")
+    ax_loss.set_xlabel("Total Losses to Banks")
+    ax_loss.set_ylabel("Frequency (Density, Log Scale)")
+    ax_loss.legend()
+    ax_loss.grid(True, axis='y', alpha=0.2)
 
-    ax_loss.set_title("Distribution of Systemic Losses (L)")
-    ax_loss.set_xlabel("Loss Amount (Log Scale)")
-    if has_loss_data:
-        ax_loss.legend()
-
-    # --- 4B: Cascade Size (Histogram) ---
+    # --- 4B: Cascade Size Distribution C ---
     ax_casc = axes[1]
-    bins = np.arange(1, Parametros.B + 2) - 0.5  # Center bars on integers
-
-    for mode in ["none", "srt"]:  # Usually compare baseline vs SRT
-        if mode in results_dict and len(results_dict[mode]["cascades"]) > 0:
-            ax_casc.hist(
-                results_dict[mode]["cascades"],
-                bins=bins,
-                alpha=0.5,
-                label=labels[mode],
-                color=colors[mode],
-                density=True,
-            )
-
-    ax_casc.set_title("Cascade Size Distribution")
-    ax_casc.set_xlabel("Number of Defaults")
+    data_C, lbls_C, cols_C = prepare_hist_data("cascades")
+    bins_c = np.arange(1, Parametros.B + 2) - 0.5
+    
+    if data_C:
+        ax_casc.hist(
+            data_C,
+            bins=bins_c,
+            label=lbls_C,
+            color=cols_C,
+            density=True,
+            histtype='bar' # Side-by-side bars
+        )
+        
+    ax_casc.set_title("(b) Distribution of cascade sizes $C$")
+    ax_casc.set_xlabel("Number of Defaulting Banks")
+    ax_casc.set_ylabel("Frequency (Density)")
+    ax_casc.set_xticks(np.arange(0, Parametros.B + 1, 5))
     ax_casc.legend()
+    ax_casc.grid(True, axis='y', alpha=0.2)
 
-    # --- 4C: Volume (Boxplot) ---
+    # --- 4C: Volume Distribution V ---
     ax_vol = axes[2]
-    data_vol = []
-    labels_vol = []
-    palette_vol = []
-
-    for mode in modes:
-        if mode in results_dict and len(results_dict[mode]["volumes"]) > 0:
-            data_vol.append(results_dict[mode]["volumes"])
-            labels_vol.append(labels[mode])
-            palette_vol.append(colors[mode])
-
-    if data_vol:
-        sns.boxplot(data=data_vol, ax=ax_vol, palette=palette_vol)
-        ax_vol.set_xticklabels(labels_vol)
-        ax_vol.set_title("Interbank Market Volume")
-        ax_vol.set_ylabel("Average Volume per Step")
+    data_V, lbls_V, cols_V = prepare_hist_data("volumes")
+    
+    if data_V:
+        ax_vol.hist(
+            data_V,
+            bins=20,
+            label=lbls_V,
+            color=cols_V,
+            density=True,
+            histtype='bar' # Side-by-side bars
+        )
+        
+    ax_vol.set_title("(c) Distribution of transaction volume $V$")
+    ax_vol.set_xlabel("Total IB Transaction Volume")
+    ax_vol.set_ylabel("Frequency (Density)")
+    ax_vol.legend()
+    ax_vol.grid(True, axis='y', alpha=0.2)
 
     plt.tight_layout()
-    plt.savefig("output_data/graficas_finales/figura4_resultados.png", dpi=300)
+    plt.savefig("output_data/graficas_finales/figura4_completa.png", dpi=300)
     plt.close()
     print(">>> Figure 4 saved in output_data/graficas_finales/")
