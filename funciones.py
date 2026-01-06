@@ -42,17 +42,28 @@ def calcular_debtrank(L, C, v, steps=100):
     # 2. State Initialization
     S = np.zeros((K, B, B), dtype=np.float64)
     idx = np.arange(B)
-    S[:, idx, idx] = 1.0  # Each node initially distressed 1.0 in its own scenario
+    S[:, idx, idx] = 1.0  # Initial shock
+    
+    # Delta stores the *new* distress to propagate
+    Delta_S = S.copy()
 
-    # 3. Recursive Dynamics
+    # 3. Recursive Dynamics (Delta Propagation)
     for _ in range(steps):
-        S_next = S + np.matmul(S, W)
-        S_next = np.minimum(1.0, S_next)
-
-        if np.allclose(S, S_next, atol=1e-5):
-            S = S_next
-            break
+        # Only propagate the NEW distress (Delta)
+        # New Impact = Delta_S @ W
+        Impact = np.matmul(Delta_S, W)
+        
+        # Update Cumulative Stress
+        S_next = np.minimum(1.0, S + Impact)
+        
+        # Calculate new Delta for next step
+        Delta_S = S_next - S
+        
         S = S_next
+        
+        # Convergence check: If no new distress, stop
+        if np.all(Delta_S < 1e-5):
+            break
 
     # 4. Calculate R_i
     v_norm = v / (np.sum(v) + 1e-10)

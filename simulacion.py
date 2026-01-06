@@ -91,6 +91,14 @@ class Modelo_CRISIS:
         # B. Credit Network (Firm -> Bank) (F x B) - Dynamic
         self.matriz_credito_firmas = np.zeros((F, B), dtype=np.float64)
 
+        # Interest Rate Matrices (Store agreed interest rates)
+        self.matriz_tasas_interbancaria = np.zeros((B, B), dtype=np.float64)
+        self.matriz_tasas_firmas = np.zeros((F, B), dtype=np.float64)
+
+        # Profit Tracking (per step)
+        self.current_step_profit_firms = np.zeros(F, dtype=np.float64)
+        self.current_step_profit_bancos = np.zeros(B, dtype=np.float64)
+
         # C. Labor Network (Household -> Firm) (H x F) - Static (initially)
         # Each household has one employer.
         self.matriz_laboral = np.zeros((H, F), dtype=np.int8)
@@ -417,7 +425,8 @@ class Modelo_CRISIS:
             taxes = np.zeros(len(potential_amounts))
 
             if self.tax_mode == "srt" and self.tax_param > 0:
-                v = self.estado_bancos[:, Parametros.IDX_BANK_TOTAL_ASSETS]
+                # v = Total Interbank Liabilities (Row Sum)
+                v = np.sum(self.matriz_interbancaria, axis=1)
                 p_default = Parametros.DEFAULT_PROB_SCALING * fn.calcular_fragilidad_financiera(
                     bank_leverage, Parametros.K_mu
                 )
@@ -458,6 +467,19 @@ class Modelo_CRISIS:
                 self.matriz_interbancaria[d, s] += amount
                 self.current_step_volume += amount
 
+                # --- UPDATE INTEREST RATES (Weighted Average) ---
+                # Rate for this specific loan transaction
+                rate_new = base_rates[idx]  # The rate for this pairing is at index idx of base_rates
+                
+                # Previous state
+                prev_amount = self.matriz_interbancaria[d, s] - amount # We just added amount, so subtract to get prev
+                prev_rate = self.matriz_tasas_interbancaria[d, s]
+                
+                # Weighted Average: (Old_Amt * Old_Rate + New_Amt * New_Rate) / Total_Amt
+                if (prev_amount + amount) > 1e-9:
+                    avg_rate = (prev_amount * prev_rate + amount * rate_new) / (prev_amount + amount)
+                    self.matriz_tasas_interbancaria[d, s] = avg_rate
+
                 self.estado_bancos[d, Parametros.IDX_BANK_LIQUIDITY] += amount
                 self.estado_bancos[s, Parametros.IDX_BANK_LIQUIDITY] -= amount
 
@@ -490,7 +512,32 @@ class Modelo_CRISIS:
         )
 
         f_indices = np.arange(Parametros.F)
+        
+        # --- UPDATE INTEREST RATES (Weighted Average) for Firms ---
+        # We need to iterate or handle this carefully because it's vectorized
+        # Old Debt
+        old_debt = self.matriz_credito_firmas[f_indices, chosen_bank_ids]
+        old_rates = self.matriz_tasas_firmas[f_indices, chosen_bank_ids]
+        
+        # New Rates for these specific pairings
+        # rates was calculated as (F, N_SEARCH). We need to pick the rates corresponding to chosen_bank_ids
+        # best_choice_local_idx (F,) tells us which of the N_SEARCH columns was picked
+        new_rates_chosen = rates[np.arange(Parametros.F), best_choice_local_idx]
+        
+        # Weighted Average
+        total_new_debt = old_debt + approved_amounts
+        
+        # Avoid division by zero
+        mask_pos = total_new_debt > 1e-9
+        
+        avg_rates = np.zeros_like(old_debt)
+        if np.any(mask_pos):
+            numerator = (old_debt[mask_pos] * old_rates[mask_pos]) + (approved_amounts[mask_pos] * new_rates_chosen[mask_pos])
+            avg_rates[mask_pos] = numerator / total_new_debt[mask_pos]
+            
+        # Update Matrices
         self.matriz_credito_firmas[f_indices, chosen_bank_ids] += approved_amounts
+        self.matriz_tasas_firmas[f_indices, chosen_bank_ids] = avg_rates
 
         self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] += approved_amounts
         np.add.at(
@@ -505,6 +552,10 @@ class Modelo_CRISIS:
         UPDATED: Uses Matrix Architecture.
         """
         # --- A. PRODUCTION & WAGES ---
+        
+        # Reset Profit Trackers
+        self.current_step_profit_firms.fill(0.0)
+        self.current_step_profit_bancos.fill(0.0)
 
         # 1. Production
         # (Assuming perishable goods or instant conversion, kept simple as before)
@@ -516,6 +567,8 @@ class Modelo_CRISIS:
 
         # Deduct from Firms
         self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] -= payments
+        # Record Expense
+        self.current_step_profit_firms -= payments
 
         # Distribute to Households (Workers) using MATRIZ_LABORAL
         # Count employees per firm: Sum columns of Matrix (H x F) -> (F,)
@@ -564,6 +617,9 @@ class Modelo_CRISIS:
         # Update Firms
         self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] += actual_revenue
         self.estado_firmas[:, Parametros.IDX_FIRM_PROD] -= sales_qty
+        
+        # Record Revenue
+        self.current_step_profit_firms += actual_revenue
 
         # 5. Households Expenditure & RECORDING (Matriz Consumo)
         # Clear previous step consumption
@@ -595,32 +651,67 @@ class Modelo_CRISIS:
         self.current_step_loss = 0.0
         self.current_step_defaults = 0
 
-        # --- A. DEBT REPAYMENT ---
+        # --- A. DEBT REPAYMENT & INTEREST ---
         tau = Parametros.DEBT_REPAYMENT_RATE
 
-        # Firms -> Banks
-        repayment_firms = self.matriz_credito_firmas * tau
-        total_pay_firm = np.sum(repayment_firms, axis=1)
-        total_receive_bank = np.sum(repayment_firms, axis=0)
+        # 1. Firms -> Banks
+        # Principal Repayment
+        principal_repayment_firms = self.matriz_credito_firmas * tau
+        
+        # Interest Payment
+        # Interest = Debt * Rate
+        interest_payment_firms = self.matriz_credito_firmas * self.matriz_tasas_firmas
+        
+        total_payment_firms_matrix = principal_repayment_firms + interest_payment_firms
+        
+        # Aggregates
+        total_pay_firm_vec = np.sum(total_payment_firms_matrix, axis=1) # (F,)
+        total_receive_bank_vec = np.sum(total_payment_firms_matrix, axis=0) # (B,)
 
-        self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] -= total_pay_firm
-        self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY] += total_receive_bank
-        self.matriz_credito_firmas -= repayment_firms
+        # Execute Payment (Liquidity)
+        # We must cap at available liquidity? Paper implies they pay or default. 
+        # Here default happens later if liq < 0. So we just subtract.
+        self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] -= total_pay_firm_vec
+        self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY] += total_receive_bank_vec
+        
+        # Update Debt Principal
+        self.matriz_credito_firmas -= principal_repayment_firms
+        
+        # Update Profits
+        self.current_step_profit_firms -= np.sum(interest_payment_firms, axis=1)
+        self.current_step_profit_bancos += np.sum(interest_payment_firms, axis=0)
 
-        # Interbank
-        repayment_ib = self.matriz_interbancaria * tau
-        total_pay_bank = np.sum(repayment_ib, axis=1)
-        total_receive_bank_ib = np.sum(repayment_ib, axis=0)
+        # 2. Interbank
+        principal_repayment_ib = self.matriz_interbancaria * tau
+        interest_payment_ib = self.matriz_interbancaria * self.matriz_tasas_interbancaria
+        
+        total_payment_ib_matrix = principal_repayment_ib + interest_payment_ib
+        
+        total_pay_bank_ib_vec = np.sum(total_payment_ib_matrix, axis=1)
+        total_receive_bank_ib_vec = np.sum(total_payment_ib_matrix, axis=0)
 
-        self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY] -= total_pay_bank
-        self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY] += total_receive_bank_ib
-        self.matriz_interbancaria -= repayment_ib
+        self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY] -= total_pay_bank_ib_vec
+        self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY] += total_receive_bank_ib_vec
+        
+        self.matriz_interbancaria -= principal_repayment_ib
+        
+        # Update Profits (Banks)
+        # Expenses: Interest paid to other banks
+        self.current_step_profit_bancos -= np.sum(interest_payment_ib, axis=1)
+        # Revenues: Interest received from other banks
+        self.current_step_profit_bancos += np.sum(interest_payment_ib, axis=0)
 
-        # --- B. DIVIDENDS ---
+        # --- B. DIVIDENDS (Based on PROFITS) ---
         # 1. Firms
-        firm_liq = self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY]
-        distributable_f = np.maximum(0, firm_liq)
+        # Profit = Revenue - Wages - Interest
+        # Dividends = max(0, Profit) * Ratio
+        distributable_f = np.maximum(0, self.current_step_profit_firms)
         dividends_f = distributable_f * Parametros.DIVIDEND_RATIO
+        
+        # Cap dividends at available liquidity to avoid immediate bankruptcy from payout
+        firm_liq = self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY]
+        dividends_f = np.minimum(dividends_f, np.maximum(0, firm_liq))
+        
         self.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] -= dividends_f
 
         # Distribute to Owners using MATRIX (H x F)
@@ -629,12 +720,13 @@ class Modelo_CRISIS:
         self.estado_hogares[:, Parametros.IDX_HH_DEPOSITS] += hh_div_income_f
 
         # 2. Banks
-        bank_liq = self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY]
-        bank_eq = self.estado_bancos[:, Parametros.IDX_BANK_EQUITY]
-        distributable_b = np.maximum(0, bank_eq)
+        # Profit = Interest(Firms) + Interest(IB_In) - Interest(IB_Out)
+        # (Assuming no other operating costs for now, or implicit in rate)
+        distributable_b = np.maximum(0, self.current_step_profit_bancos)
         dividends_b = distributable_b * Parametros.DIVIDEND_RATIO
-        dividends_b = np.minimum(dividends_b, bank_liq)
-        dividends_b = np.maximum(0, dividends_b)
+        
+        bank_liq = self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY]
+        dividends_b = np.minimum(dividends_b, np.maximum(0, bank_liq))
 
         self.estado_bancos[:, Parametros.IDX_BANK_LIQUIDITY] -= dividends_b
         self.estado_bancos[:, Parametros.IDX_BANK_EQUITY] -= dividends_b

@@ -45,8 +45,15 @@ def calculate_systemic_risk_metrics(L, equity, assets):
     equity_safe = np.maximum(equity, 0.001)
 
     # DebtRank Base
-    # v = assets (proxy for economic value)
-    v = assets
+    # v = Total Interbank Liabilities (Row Sum)
+    v = np.sum(L, axis=1)
+    
+    # If no interbank debt exists, v is 0. Avoid issues.
+    if np.sum(v) == 0:
+         # Fallback to Assets if network is empty? Or just 0.
+         # If v=0, DebtRank is 0.
+         pass
+
     V_total = np.sum(v)
     if V_total == 0:
         return np.zeros_like(equity), [], 0.0
