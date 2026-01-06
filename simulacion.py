@@ -81,13 +81,13 @@ class Modelo_CRISIS:
         self.estado_firmas[:, Parametros.IDX_FIRM_PRICE_PREV] = init_price
 
         # --- 3. Topology & Relationships (Matrices) ---
-        
+
         # A. Interbank Network (B x B) - Dynamic
         self.matriz_interbancaria = np.zeros((B, B), dtype=np.float64)
-        
+
         # B. Credit Network (Firm -> Bank) (F x B) - Dynamic
         self.matriz_credito_firmas = np.zeros((F, B), dtype=np.float64)
-        
+
         # C. Labor Network (Household -> Firm) (H x F) - Static (initially)
         # Each household has one employer.
         self.matriz_laboral = np.zeros((H, F), dtype=np.int8)
@@ -114,7 +114,7 @@ class Modelo_CRISIS:
         # Next B households -> Bank Owners
         bank_owners = hh_indices[F : F + B]
         self.matriz_propiedad_bancos[bank_owners, np.arange(B)] = 1
-        
+
         # F. Consumption Network (Household -> Firm) (H x F) - Dynamic per step
         # Stores the MONETARY VALUE of consumption.
         self.matriz_consumo = np.zeros((H, F), dtype=np.float64)
@@ -138,20 +138,40 @@ class Modelo_CRISIS:
     def registrar_historia(self):
         """Append current state snapshots to step_buffer."""
         # Topologies
-        self.step_buffer["matriz_interbancaria"].append(self.matriz_interbancaria.astype(np.float32).copy())
-        self.step_buffer["matriz_credito_firmas"].append(self.matriz_credito_firmas.astype(np.float32).copy())
-        self.step_buffer["matriz_consumo"].append(self.matriz_consumo.astype(np.float32).copy())
-        
+        self.step_buffer["matriz_interbancaria"].append(
+            self.matriz_interbancaria.astype(np.float32).copy()
+        )
+        self.step_buffer["matriz_credito_firmas"].append(
+            self.matriz_credito_firmas.astype(np.float32).copy()
+        )
+        self.step_buffer["matriz_consumo"].append(
+            self.matriz_consumo.astype(np.float32).copy()
+        )
+
         # These are technically static or semi-static, but for full reconstruction we save them.
-        self.step_buffer["matriz_laboral"].append(self.matriz_laboral.astype(np.int8).copy())
-        self.step_buffer["matriz_depositos"].append(self.matriz_depositos.astype(np.int8).copy())
-        self.step_buffer["matriz_propiedad_firmas"].append(self.matriz_propiedad_firmas.astype(np.int8).copy())
-        self.step_buffer["matriz_propiedad_bancos"].append(self.matriz_propiedad_bancos.astype(np.int8).copy())
+        self.step_buffer["matriz_laboral"].append(
+            self.matriz_laboral.astype(np.int8).copy()
+        )
+        self.step_buffer["matriz_depositos"].append(
+            self.matriz_depositos.astype(np.int8).copy()
+        )
+        self.step_buffer["matriz_propiedad_firmas"].append(
+            self.matriz_propiedad_firmas.astype(np.int8).copy()
+        )
+        self.step_buffer["matriz_propiedad_bancos"].append(
+            self.matriz_propiedad_bancos.astype(np.int8).copy()
+        )
 
         # States
-        self.step_buffer["estado_bancos"].append(self.estado_bancos.astype(np.float32).copy())
-        self.step_buffer["estado_firmas"].append(self.estado_firmas.astype(np.float32).copy())
-        self.step_buffer["estado_hogares"].append(self.estado_hogares.astype(np.float32).copy())
+        self.step_buffer["estado_bancos"].append(
+            self.estado_bancos.astype(np.float32).copy()
+        )
+        self.step_buffer["estado_firmas"].append(
+            self.estado_firmas.astype(np.float32).copy()
+        )
+        self.step_buffer["estado_hogares"].append(
+            self.estado_hogares.astype(np.float32).copy()
+        )
 
     def reset_history(self):
         """Clear the step buffer to free RAM after flushing."""
@@ -185,51 +205,53 @@ class Modelo_CRISIS:
         Fires workers if Overstaffed. Hires workers if Understaffed.
         """
         # 1. Current state
-        current_workers = np.sum(self.matriz_laboral, axis=0) # (F,)
+        current_workers = np.sum(self.matriz_laboral, axis=0)  # (F,)
         target_workers = self.estado_firmas[:, Parametros.IDX_FIRM_WORKERS].astype(int)
-        
+
         delta = target_workers - current_workers
-        
+
         # Identify firms that need change
-        
+
         # --- FIRING (delta < 0) ---
         firing_firms = np.where(delta < 0)[0]
         for f in firing_firms:
             n_fire = abs(delta[f])
             # Find current employees: (H,) boolean mask -> indices
             employee_indices = np.where(self.matriz_laboral[:, f] == 1)[0]
-            
+
             if len(employee_indices) > 0:
                 n_fire = min(n_fire, len(employee_indices))
-                fired_indices = self.rng.choice(employee_indices, size=n_fire, replace=False)
+                fired_indices = self.rng.choice(
+                    employee_indices, size=n_fire, replace=False
+                )
                 # Update Matrix
                 self.matriz_laboral[fired_indices, f] = 0
-                
+
         # --- HIRING (delta > 0) ---
         hiring_firms = np.where(delta > 0)[0]
-        
+
         # Identify unemployed pool (Dynamic based on firings just happened)
         # Sum rows: if 0, unemployed.
         employment_status = np.sum(self.matriz_laboral, axis=1)
         unemployed_indices = np.where(employment_status == 0)[0]
-        
+
         # Shuffle unemployed pool once
         self.rng.shuffle(unemployed_indices)
         pool_ptr = 0
         total_unemployed = len(unemployed_indices)
-        
+
         for f in hiring_firms:
             n_hire = delta[f]
-            
+
             # Check availability
             remaining_in_pool = total_unemployed - pool_ptr
             if remaining_in_pool <= 0:
-                break # No more workers
-            
+                break  # No more workers
+
             # Hire
             actual_hire = min(n_hire, remaining_in_pool)
             new_hires = unemployed_indices[pool_ptr : pool_ptr + actual_hire]
-            
+
             # Update Matrix
             self.matriz_laboral[new_hires, f] = 1
             pool_ptr += actual_hire
@@ -237,8 +259,12 @@ class Modelo_CRISIS:
         # Final Sync: Update Firm State to match actual Matrix (Rationing)
         real_workers = np.sum(self.matriz_laboral, axis=0)
         self.estado_firmas[:, Parametros.IDX_FIRM_WORKERS] = real_workers
-        self.estado_firmas[:, Parametros.IDX_FIRM_PROD] = real_workers * Parametros.alpha
-        self.estado_firmas[:, Parametros.IDX_FIRM_WAGES] = real_workers * Parametros.WAGE
+        self.estado_firmas[:, Parametros.IDX_FIRM_PROD] = (
+            real_workers * Parametros.alpha
+        )
+        self.estado_firmas[:, Parametros.IDX_FIRM_WAGES] = (
+            real_workers * Parametros.WAGE
+        )
 
     def paso_planificacion_firmas(self):
         """
@@ -296,7 +322,7 @@ class Modelo_CRISIS:
         # --- 4. Labor Market Dynamics (Sync Matrix) ---
         # This updates Workers, Prod, and Wages to REALITY (Rationing applied)
         self.actualizar_mercado_laboral()
-        
+
         # Re-fetch REAL wage bill for credit demand
         wage_bill = self.estado_firmas[:, Parametros.IDX_FIRM_WAGES]
 
@@ -351,7 +377,7 @@ class Modelo_CRISIS:
 
         deficit_ids = np.where(gaps > 0)[0]
         surplus_ids = np.where(gaps < 0)[0]
-        
+
         # print(f"DEBUG [Step]: Deficit Banks: {len(deficit_ids)}, Surplus Banks: {len(surplus_ids)}")
 
         total_taxes = 0.0
@@ -437,14 +463,14 @@ class Modelo_CRISIS:
                 actual_tax = 0.0
                 if pre_amt > 1e-9:
                     actual_tax = pre_tax * (amount / pre_amt)
-                
+
                 if actual_tax > 0:
                     self.estado_bancos[d, Parametros.IDX_BANK_EQUITY] -= actual_tax
                     total_taxes += actual_tax
 
                 dyn_gaps[d] -= amount
                 dyn_gaps[s] += amount
-        
+
         # print(f"DEBUG [Step]: Total Interbank Volume: {self.current_step_volume:.2f}, Taxes: {total_taxes:.4f}")
 
         # --- PART C: DISBURSEMENT TO FIRMS ---
@@ -637,13 +663,19 @@ class Modelo_CRISIS:
             )
             init_price = Parametros.WAGE / Parametros.alpha
 
-            self.estado_firmas[dead_firms_indices, Parametros.IDX_FIRM_LIQUIDITY] = init_liq
-            self.estado_firmas[dead_firms_indices, Parametros.IDX_FIRM_EQUITY] = init_liq
-            self.estado_firmas[dead_firms_indices, Parametros.IDX_FIRM_PRICE] = init_price
+            self.estado_firmas[dead_firms_indices, Parametros.IDX_FIRM_LIQUIDITY] = (
+                init_liq
+            )
+            self.estado_firmas[dead_firms_indices, Parametros.IDX_FIRM_EQUITY] = (
+                init_liq
+            )
+            self.estado_firmas[dead_firms_indices, Parametros.IDX_FIRM_PRICE] = (
+                init_price
+            )
             self.estado_firmas[dead_firms_indices, Parametros.IDX_FIRM_LEVERAGE] = 0.0
             self.estado_firmas[dead_firms_indices, Parametros.IDX_FIRM_DEMAND] = 0.0
-            
-            # NOTE: We do NOT reset ownership matrices. Dead firms are just "restructured" 
+
+            # NOTE: We do NOT reset ownership matrices. Dead firms are just "restructured"
             # and old owners keep shares (or we assume new equity injection comes from same owners).
             # This keeps the graph structure stable as per standard ABM simplification.
 
@@ -678,11 +710,15 @@ class Modelo_CRISIS:
                 Parametros.INIT_BANK_ASSETS[1],
                 size=n_dead_b,
             )
-            self.estado_bancos[all_dead_ids, Parametros.IDX_BANK_TOTAL_ASSETS] = init_assets
+            self.estado_bancos[all_dead_ids, Parametros.IDX_BANK_TOTAL_ASSETS] = (
+                init_assets
+            )
             self.estado_bancos[all_dead_ids, Parametros.IDX_BANK_EQUITY] = (
                 init_assets * Parametros.INIT_CAPITAL_RATIO
             )
-            self.estado_bancos[all_dead_ids, Parametros.IDX_BANK_LIQUIDITY] = init_assets
+            self.estado_bancos[all_dead_ids, Parametros.IDX_BANK_LIQUIDITY] = (
+                init_assets
+            )
             self.estado_bancos[all_dead_ids, Parametros.IDX_BANK_DEPOSITS] = (
                 init_assets * (1 - Parametros.INIT_CAPITAL_RATIO)
             )
@@ -703,3 +739,4 @@ class Modelo_CRISIS:
         self.paso_contabilidad()
 
         self.registrar_historia()
+

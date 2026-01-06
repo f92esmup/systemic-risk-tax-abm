@@ -5,6 +5,7 @@ from tqdm import tqdm
 from simulacion import Modelo_CRISIS
 from parametros import Parametros
 import analisis
+import grafos
 
 # --- CONFIGURATION ---
 DEFAULT_STEPS_PAPER = 500
@@ -100,6 +101,18 @@ def run_mode_paper_replication():
     print(
         "\nReplication complete. Figures 3 and 4 saved in output_data/graficas_finales."
     )
+
+    # Generate GIF for Run 0 (Scenario: None)
+    print("\n>>> Generating Network Dynamics GIF (Run 0, Scenario: None) <<<")
+    grafos.crear_gif_redes("none", n_run=0, steps_limit=DEFAULT_STEPS_PAPER)
+
+    # Generate GIF for Run 0 (Scenario: Tobin)
+    print("\n>>> Generating Network Dynamics GIF (Run 0, Scenario: Tobin) <<<")
+    grafos.crear_gif_redes("tobin", n_run=0, steps_limit=DEFAULT_STEPS_PAPER)
+
+    # Generate GIF for Run 0 (Scenario: SRT)
+    print("\n>>> Generating Network Dynamics GIF (Run 0, Scenario: SRT) <<<")
+    grafos.crear_gif_redes("srt", n_run=0, steps_limit=DEFAULT_STEPS_PAPER)
 
 
 if __name__ == "__main__":

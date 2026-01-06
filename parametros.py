@@ -6,15 +6,15 @@ class Parametros:
 
     # --- System Dimensions ---
     T = 500  # Time steps
-    B = 20   # Number of Banks (N^b)
+    B = 20  # Number of Banks (N^b)
     F = 100  # Number of Firms (N^f)
-    H = 1300 # Number of Households (N^h)
+    H = 1300  # Number of Households (N^h)
 
     # --- Economic Parameters (Table I) ---
 
     # Labor & Production
     # CALIBRATION: Matches Table I in Poledna & Thurner (2016)
-    WAGE = 1.0   # Wage rate (w_b)
+    WAGE = 1.0  # Wage rate (w_b)
     alpha = 0.1  # Labor productivity (alpha)
 
     # Consumption
