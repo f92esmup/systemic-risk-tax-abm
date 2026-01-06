@@ -66,11 +66,23 @@ def calcular_debtrank(L, C, v, steps=100):
             break
 
     # 4. Calculate R_i
-    v_norm = v / (np.sum(v) + 1e-10)
-    v_broad = v_norm[np.newaxis, np.newaxis, :]
+    # Handle v broadcasting for batch mode
+    if v.ndim == 1:
+        # v is (B,), broadcast to (K, B) effectively
+        v_sum = np.sum(v) + 1e-10
+        v_norm = v / v_sum
+        v_broad = v_norm[np.newaxis, np.newaxis, :] # (1, 1, B)
+        self_v = v_norm[np.newaxis, :] # (1, B)
+    else:
+        # v is (K, B)
+        v_sum = np.sum(v, axis=1, keepdims=True) + 1e-10
+        v_norm = v / v_sum # (K, B)
+        v_broad = v_norm[:, np.newaxis, :] # (K, 1, B)
+        self_v = v_norm # (K, B)
+
     Weighted_S = S * v_broad  # (K, B, B)
     Total_Impact = np.sum(Weighted_S, axis=2)
-    self_impact = S[:, idx, idx] * v_norm[np.newaxis, :]
+    self_impact = S[:, idx, idx] * self_v
 
     R = Total_Impact - self_impact
     R = np.maximum(0.0, R)
@@ -104,10 +116,16 @@ def calcular_impuesto_srt(
     L_batch[batch_indices, rows, cols] += proposed_amounts
 
     # 3. Compute DebtRank for Batch
-    R_batch = calcular_debtrank(L_batch, C, v)  # (N_props, B)
+    # Recalculate v for the hypothetical scenarios
+    # v is total liabilities (sum of rows)
+    v_batch = np.sum(L_batch, axis=2)
+    
+    R_batch = calcular_debtrank(L_batch, C, v_batch)  # (N_props, B)
 
     # 4. Expected Loss for Batch
-    EL_new = np.sum(p_default[np.newaxis, :] * R_batch, axis=1) * V_total
+    # Update V_total for the batch as well
+    V_total_batch = np.sum(v_batch, axis=1)
+    EL_new = np.sum(p_default[np.newaxis, :] * R_batch, axis=1) * V_total_batch
 
     # 5. Marginal Contribution & Tax
     marginal_risk = EL_new - EL_base

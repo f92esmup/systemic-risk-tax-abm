@@ -56,11 +56,11 @@ class Parametros:
     # Initialization Distributions (Calibrated for B=20, F=100, H=1300)
     # Total liquidity in system must support wages (H*wb=1300) and IB volume (~40)
     INIT_BANK_ASSETS = (300, 900)  # Increased to ensure systemic stability
-    INIT_FIRM_ASSETS = (20, 40)  # Enough for initial wages before first sales
+    INIT_FIRM_ASSETS = (10, 20)  # Lowered to increase default probability
 
     # Capital Adequacy for Initialization (Basel III context)
     INIT_CAPITAL_RATIO = (
-        0.05  # 5% Equity initially as per common ABM setups in the paper series
+        0.02  # Reduced to 2% to induce fragility
     )
 
     # --- COLUMN INDICES (SCHEMA) ---

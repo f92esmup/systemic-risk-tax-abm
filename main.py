@@ -8,9 +8,9 @@ import analisis
 import grafos
 
 # --- CONFIGURATION ---
-DEFAULT_STEPS_PAPER = 400
+DEFAULT_STEPS_PAPER = 50
 
-DEFAULT_RUNS_PAPER = 10
+DEFAULT_RUNS_PAPER = 100
 
 
 def run_simulation_single(mode, param, steps, run_id, output_folder, save_disk=True):

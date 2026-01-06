@@ -1,8 +1,11 @@
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # Force non-interactive backend
 import matplotlib.pyplot as plt
 import networkx as nx
 from PIL import Image
 import os
+import gc
 from parametros import Parametros
 
 
@@ -182,7 +185,8 @@ def crear_gif_redes(mode, n_run, steps_limit=None, output_filename=None):
     os.makedirs(temp_dir, exist_ok=True)
 
     filenames = []
-    step_jump = max(1, steps_limit // 40)  # Target ~40 frames
+    # Target ~20 frames for speed (was 40)
+    step_jump = max(1, steps_limit // 20)
 
     # 4. Loop
     for t in range(0, steps_limit, step_jump):
@@ -239,11 +243,13 @@ def crear_gif_redes(mode, n_run, steps_limit=None, output_filename=None):
         frame_path = f"{temp_dir}/frame_{t:05d}.png"
         plt.tight_layout(rect=(0, 0.03, 1, 0.95))
         plt.savefig(frame_path, dpi=70)  # Lower DPI for speed
-        plt.close(fig)
+        plt.close('all')  # Close all figures to free memory
         filenames.append(frame_path)
 
-        if t % step_jump == 0:
-            print(f"Rendered step {t}/{steps_limit}")
+        # Force Garbage Collection
+        gc.collect()
+
+        print(f"Rendered step {t}/{steps_limit}")
 
     # 5. Compile
     print("Compiling GIF...")
