@@ -50,37 +50,10 @@ def run_simulation_single(mode, param, steps, run_id, output_folder, save_disk=T
     return model, metrics
 
 
-def run_mode_single_demo():
-    """
-    Mode: SINGLE_DEMO
-    Runs 1 simulation and generates network graphs.
-    """
-    print("\n>>> MODE: SINGLE_DEMO <<<\n")
-    mode = "srt"  # Use SRT to show the full mechanism
-    param = Parametros.TAX_SRT_ZETA
-    folder = "output_data/demo"
-
-    print(f"Running 1 simulation (Mode: {mode}, Steps: {DEFAULT_STEPS_DEMO})...")
-    model, _ = run_simulation_single(
-        mode, param, DEFAULT_STEPS_DEMO, run_id=0, output_folder=folder
-    )
-
-    print("Generating Network Graphs...")
-    steps_to_plot = [20, 40, 50]
-    for s in steps_to_plot:
-        if s < DEFAULT_STEPS_DEMO:
-            visualizacion.generar_grafo_multicapa(run_id=0, step=s, folder=folder)
-
-    print(f"\nDemo complete. Data saved to {folder}/\n")
-    print(f"Graphs saved in {os.getcwd()}")
-
-
 def run_mode_paper_replication():
     """
-    Mode: PAPER_REPLICATION
     Runs batch simulations and generates Figure 3 & 4.
     """
-    print("\n>>> MODE: PAPER_REPLICATION <<<\n")
     print(
         f"Configuration: {DEFAULT_RUNS_PAPER} runs per scenario, {DEFAULT_STEPS_PAPER} steps."
     )
@@ -132,26 +105,5 @@ def run_mode_paper_replication():
     )
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Antigravity Systemic Risk Model - Main Execution Script"
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["SINGLE_DEMO", "PAPER_REPLICATION"],
-        default="SINGLE_DEMO",
-        help="Execution mode: SINGLE_DEMO (fast, visualization) or PAPER_REPLICATION (batch, stats)",
-    )
-
-    args = parser.parse_args()
-
-    if args.mode == "SINGLE_DEMO":
-        run_mode_single_demo()
-    elif args.mode == "PAPER_REPLICATION":
-        run_mode_paper_replication()
-
-
 if __name__ == "__main__":
-    main()
-
-
+    run_mode_paper_replication()
