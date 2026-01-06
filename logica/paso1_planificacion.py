@@ -1,6 +1,7 @@
 import numpy as np
 from parametros import Parametros
 
+
 def ejecutar_paso1(modelo):
     """
     Paso 1: Planificación de Firmas.
@@ -9,7 +10,7 @@ def ejecutar_paso1(modelo):
     - Definición de Demanda de Trabajo y Capital (Target).
     - Calculo de Demanda de Crédito (Estimada basada en Target).
     """
-    
+
     # --- 1. Update Prices ---
     prices = modelo.estado_firmas[:, Parametros.IDX_FIRM_PRICE]
 
@@ -53,9 +54,7 @@ def ejecutar_paso1(modelo):
 
     modelo.estado_firmas[:, Parametros.IDX_FIRM_WORKERS] = labor_needed
     # Initial estimate of production/wages (Target)
-    modelo.estado_firmas[:, Parametros.IDX_FIRM_PROD] = (
-        labor_needed * Parametros.alpha
-    )
+    modelo.estado_firmas[:, Parametros.IDX_FIRM_PROD] = labor_needed * Parametros.alpha
     wage_bill = labor_needed * Parametros.WAGE
     modelo.estado_firmas[:, Parametros.IDX_FIRM_WAGES] = wage_bill
 

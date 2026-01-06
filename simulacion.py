@@ -228,8 +228,9 @@ class Modelo_CRISIS:
         ejecutar_paso2(self)
         ejecutar_paso3(self)
         ejecutar_paso4(self)
-        ejecutar_paso5(self) # Dividends & Bankruptcies (Step 5)
-        ejecutar_paso6(self) # Repayment (Step 6)
+        ejecutar_paso5(self)  # Dividends & Bankruptcies (Step 5)
+        ejecutar_paso6(self)  # Repayment (Step 6)
         ejecutar_paso7(self)
 
         self.registrar_historia()
+

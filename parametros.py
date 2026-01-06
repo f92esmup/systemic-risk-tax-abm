@@ -55,13 +55,11 @@ class Parametros:
 
     # Initialization Distributions (Calibrated for B=20, F=100, H=1300)
     # Total liquidity in system must support wages (H*wb=1300) and IB volume (~40)
-    INIT_BANK_ASSETS = (300, 900)  # Increased to ensure systemic stability
-    INIT_FIRM_ASSETS = (10, 20)  # Lowered to increase default probability
+    INIT_BANK_ASSETS = (300, 900)
+    INIT_FIRM_ASSETS = (20, 40)
 
     # Capital Adequacy for Initialization (Basel III context)
-    INIT_CAPITAL_RATIO = (
-        0.02  # Reduced to 2% to induce fragility
-    )
+    INIT_CAPITAL_RATIO = 0.05  # 5% Equity as per standard Poledna-Thurner ABM setups
 
     # --- COLUMN INDICES (SCHEMA) ---
 

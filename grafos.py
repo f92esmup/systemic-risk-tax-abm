@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')  # Force non-interactive backend
+
+matplotlib.use("Agg")  # Force non-interactive backend
 import matplotlib.pyplot as plt
 import networkx as nx
 from PIL import Image
@@ -243,7 +244,7 @@ def crear_gif_redes(mode, n_run, steps_limit=None, output_filename=None):
         frame_path = f"{temp_dir}/frame_{t:05d}.png"
         plt.tight_layout(rect=(0, 0.03, 1, 0.95))
         plt.savefig(frame_path, dpi=70)  # Lower DPI for speed
-        plt.close('all')  # Close all figures to free memory
+        plt.close("all")  # Close all figures to free memory
         filenames.append(frame_path)
 
         # Force Garbage Collection

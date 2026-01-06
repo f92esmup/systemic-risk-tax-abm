@@ -1,16 +1,17 @@
 import numpy as np
 from parametros import Parametros
 
+
 def ejecutar_paso3(modelo):
     """
     Paso 3: Producción y Asignación de Capital (Trabajo).
     - Contratación / Despido de trabajadores (Mercado Laboral).
     - Actualización de producción real basada en trabajadores obtenidos.
     """
-    
+
     # 1. Current state
     current_workers = np.sum(modelo.matriz_laboral, axis=0)  # (F,)
-    
+
     # Target was set in Step 1
     target_workers = modelo.estado_firmas[:, Parametros.IDX_FIRM_WORKERS].astype(int)
 
@@ -65,11 +66,7 @@ def ejecutar_paso3(modelo):
     # Final Sync: Update Firm State to match actual Matrix (Rationing)
     real_workers = np.sum(modelo.matriz_laboral, axis=0)
     modelo.estado_firmas[:, Parametros.IDX_FIRM_WORKERS] = real_workers
-    
+
     # Update Production and Wages based on REAL workers
-    modelo.estado_firmas[:, Parametros.IDX_FIRM_PROD] = (
-        real_workers * Parametros.alpha
-    )
-    modelo.estado_firmas[:, Parametros.IDX_FIRM_WAGES] = (
-        real_workers * Parametros.WAGE
-    )
+    modelo.estado_firmas[:, Parametros.IDX_FIRM_PROD] = real_workers * Parametros.alpha
+    modelo.estado_firmas[:, Parametros.IDX_FIRM_WAGES] = real_workers * Parametros.WAGE

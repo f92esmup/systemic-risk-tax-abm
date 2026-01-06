@@ -1,6 +1,7 @@
 import numpy as np
 from parametros import Parametros
 
+
 def ejecutar_paso4(modelo):
     """
     Paso 4: Mercado de Consumo y Salarios.
@@ -8,14 +9,14 @@ def ejecutar_paso4(modelo):
     - Decisión de consumo y ahorro.
     - Compra de bienes a firmas.
     """
-    
+
     # Reset Profit Trackers
     modelo.current_step_profit_firms.fill(0.0)
     modelo.current_step_profit_bancos.fill(0.0)
 
     # --- A. WAGE PAYMENT ---
     wage_bills = modelo.estado_firmas[:, Parametros.IDX_FIRM_WAGES]
-    
+
     # Firms pay their workers (even if it takes liquidity negative)
     # Note: In Step 2 they raised liquidity specifically for this.
     modelo.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] -= wage_bills
@@ -69,7 +70,7 @@ def ejecutar_paso4(modelo):
     # Update Firms
     modelo.estado_firmas[:, Parametros.IDX_FIRM_LIQUIDITY] += actual_revenue
     modelo.estado_firmas[:, Parametros.IDX_FIRM_PROD] -= sales_qty
-    
+
     # Record Revenue
     modelo.current_step_profit_firms += actual_revenue
 

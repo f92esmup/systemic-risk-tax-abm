@@ -1,13 +1,14 @@
 import numpy as np
 from parametros import Parametros
 
+
 def ejecutar_paso7(modelo):
     """
     Paso 7: Cierre Bancario y Gestión de Liquidez Imprevista.
     - Cascadas de default bancario.
     - Bailout / Reestructuración de bancos.
     """
-    
+
     # 2. Bank Default Cascades
     processed_mask = np.zeros(Parametros.B, dtype=bool)
 
@@ -45,9 +46,7 @@ def ejecutar_paso7(modelo):
         modelo.estado_bancos[all_dead_ids, Parametros.IDX_BANK_EQUITY] = (
             init_assets * Parametros.INIT_CAPITAL_RATIO
         )
-        modelo.estado_bancos[all_dead_ids, Parametros.IDX_BANK_LIQUIDITY] = (
-            init_assets
-        )
+        modelo.estado_bancos[all_dead_ids, Parametros.IDX_BANK_LIQUIDITY] = init_assets
         modelo.estado_bancos[all_dead_ids, Parametros.IDX_BANK_DEPOSITS] = (
             init_assets * (1 - Parametros.INIT_CAPITAL_RATIO)
         )

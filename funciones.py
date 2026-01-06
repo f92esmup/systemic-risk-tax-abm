@@ -43,7 +43,7 @@ def calcular_debtrank(L, C, v, steps=100):
     S = np.zeros((K, B, B), dtype=np.float64)
     idx = np.arange(B)
     S[:, idx, idx] = 1.0  # Initial shock
-    
+
     # Delta stores the *new* distress to propagate
     Delta_S = S.copy()
 
@@ -52,15 +52,15 @@ def calcular_debtrank(L, C, v, steps=100):
         # Only propagate the NEW distress (Delta)
         # New Impact = Delta_S @ W
         Impact = np.matmul(Delta_S, W)
-        
+
         # Update Cumulative Stress
         S_next = np.minimum(1.0, S + Impact)
-        
+
         # Calculate new Delta for next step
         Delta_S = S_next - S
-        
+
         S = S_next
-        
+
         # Convergence check: If no new distress, stop
         if np.all(Delta_S < 1e-5):
             break
@@ -71,14 +71,14 @@ def calcular_debtrank(L, C, v, steps=100):
         # v is (B,), broadcast to (K, B) effectively
         v_sum = np.sum(v) + 1e-10
         v_norm = v / v_sum
-        v_broad = v_norm[np.newaxis, np.newaxis, :] # (1, 1, B)
-        self_v = v_norm[np.newaxis, :] # (1, B)
+        v_broad = v_norm[np.newaxis, np.newaxis, :]  # (1, 1, B)
+        self_v = v_norm[np.newaxis, :]  # (1, B)
     else:
         # v is (K, B)
         v_sum = np.sum(v, axis=1, keepdims=True) + 1e-10
-        v_norm = v / v_sum # (K, B)
-        v_broad = v_norm[:, np.newaxis, :] # (K, 1, B)
-        self_v = v_norm # (K, B)
+        v_norm = v / v_sum  # (K, B)
+        v_broad = v_norm[:, np.newaxis, :]  # (K, 1, B)
+        self_v = v_norm  # (K, B)
 
     Weighted_S = S * v_broad  # (K, B, B)
     Total_Impact = np.sum(Weighted_S, axis=2)
@@ -119,7 +119,7 @@ def calcular_impuesto_srt(
     # Recalculate v for the hypothetical scenarios
     # v is total liabilities (sum of rows)
     v_batch = np.sum(L_batch, axis=2)
-    
+
     R_batch = calcular_debtrank(L_batch, C, v_batch)  # (N_props, B)
 
     # 4. Expected Loss for Batch

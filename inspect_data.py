@@ -5,7 +5,7 @@ try:
     data = np.load(file_path)
     print(f"Loaded {file_path}")
     print("Keys:", data.files)
-    
+
     for key in data.files:
         arr = data[key]
         print(f"\nMatrix: {key}")
@@ -18,4 +18,3 @@ try:
 
 except Exception as e:
     print(f"Error loading file: {e}")
-

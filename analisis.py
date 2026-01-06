@@ -47,12 +47,12 @@ def calculate_systemic_risk_metrics(L, equity, assets):
     # DebtRank Base
     # v = Total Interbank Liabilities (Row Sum)
     v = np.sum(L, axis=1)
-    
+
     # If no interbank debt exists, v is 0. Avoid issues.
     if np.sum(v) == 0:
-         # Fallback to Assets if network is empty? Or just 0.
-         # If v=0, DebtRank is 0.
-         pass
+        # Fallback to Assets if network is empty? Or just 0.
+        # If v=0, DebtRank is 0.
+        pass
 
     V_total = np.sum(v)
     if V_total == 0:
@@ -131,7 +131,9 @@ def generar_figura_3(output_folder_base="output_data"):
                     equity = banks[:, 1]
                     assets = banks[:, 7]
 
-                    R, margs, EL_base = calculate_systemic_risk_metrics(L, equity, assets)
+                    R, margs, EL_base = calculate_systemic_risk_metrics(
+                        L, equity, assets
+                    )
                     data_store[mode] = {"R": R, "marginals": margs, "EL_base": EL_base}
                     hay_datos = True
                     found_good_run = True
@@ -153,7 +155,7 @@ def generar_figura_3(output_folder_base="output_data"):
 
     # --- PLOT 3B: DebtRank Profile (Bar Chart) ---
     ax_bar = axes[0]
-    
+
     # Base ordering (No Tax) for x-axis
     if "none" in data_store:
         base_R = data_store["none"]["R"]
@@ -167,41 +169,55 @@ def generar_figura_3(output_folder_base="output_data"):
 
     # Plot bars
     offsets = {"none": -bar_width, "tobin": 0, "srt": bar_width}
-    
+
     for mode in modes:
         if mode in data_store:
             R = data_store[mode]["R"]
             # Reorder R based on the 'none' ranking
             R_sorted = R[rank_indices]
-            
-            ax_bar.bar(x + offsets[mode], R_sorted, width=bar_width, label=labels[mode], color=colors[mode], alpha=0.7)
+
+            ax_bar.bar(
+                x + offsets[mode],
+                R_sorted,
+                width=bar_width,
+                label=labels[mode],
+                color=colors[mode],
+                alpha=0.7,
+            )
 
     ax_bar.set_xlabel("Banks (Sorted by Risk in 'No Tax')")
     ax_bar.set_ylabel("DebtRank ($R_i$)")
     ax_bar.set_title("(b) Model results for $R_i$")
     ax_bar.set_xticks(x)
-    ax_bar.set_xticklabels(x + 1) # 1-based indexing for display
+    ax_bar.set_xticklabels(x + 1)  # 1-based indexing for display
     ax_bar.legend()
-    ax_bar.grid(True, axis='y', alpha=0.3)
+    ax_bar.grid(True, axis="y", alpha=0.3)
 
     # --- PLOT 3D: Marginal Contributions (Scatter) ---
     ax_scat = axes[1]
-    
+
     for mode in modes:
         if mode in data_store:
             margs = data_store[mode]["marginals"]
             EL_base = data_store[mode]["EL_base"]
-            
+
             if margs and EL_base > 0:
                 loans_rel, deltas = zip(*margs)
-                
+
                 # Convert to percentages
                 x_pct = np.array(loans_rel) * 100
                 y_pct = (np.array(deltas) / EL_base) * 100
-                
-                ax_scat.scatter(x_pct, y_pct, color=colors[mode], alpha=0.6, s=20, label=labels[mode])
+
+                ax_scat.scatter(
+                    x_pct,
+                    y_pct,
+                    color=colors[mode],
+                    alpha=0.6,
+                    s=20,
+                    label=labels[mode],
+                )
             else:
-                pass # No data or EL_base 0
+                pass  # No data or EL_base 0
 
     ax_scat.set_xlabel("Relative Loan Size [%] ($L_{ij} / E_j$)")
     ax_scat.set_ylabel("Relative Increment EL sys [%]")
@@ -248,7 +264,7 @@ def generar_figura_4(results_dict):
     # --- 4A: Losses Distribution L ---
     ax_loss = axes[0]
     data_L, lbls_L, cols_L = prepare_hist_data("losses")
-    
+
     if data_L:
         ax_loss.hist(
             data_L,
@@ -256,21 +272,21 @@ def generar_figura_4(results_dict):
             label=lbls_L,
             color=cols_L,
             density=True,
-            histtype='bar',  # Side-by-side bars
-            log=True         # Log scale for y-axis
+            histtype="bar",  # Side-by-side bars
+            log=True,  # Log scale for y-axis
         )
-        
+
     ax_loss.set_title("(a) Distribution of total losses $L$")
     ax_loss.set_xlabel("Total Losses to Banks")
     ax_loss.set_ylabel("Frequency (Density, Log Scale)")
     ax_loss.legend()
-    ax_loss.grid(True, axis='y', alpha=0.2)
+    ax_loss.grid(True, axis="y", alpha=0.2)
 
     # --- 4B: Cascade Size Distribution C ---
     ax_casc = axes[1]
     data_C, lbls_C, cols_C = prepare_hist_data("cascades")
     bins_c = np.arange(1, Parametros.B + 2) - 0.5
-    
+
     if data_C:
         ax_casc.hist(
             data_C,
@@ -278,20 +294,20 @@ def generar_figura_4(results_dict):
             label=lbls_C,
             color=cols_C,
             density=True,
-            histtype='bar' # Side-by-side bars
+            histtype="bar",  # Side-by-side bars
         )
-        
+
     ax_casc.set_title("(b) Distribution of cascade sizes $C$")
     ax_casc.set_xlabel("Number of Defaulting Banks")
     ax_casc.set_ylabel("Frequency (Density)")
     ax_casc.set_xticks(np.arange(0, Parametros.B + 1, 5))
     ax_casc.legend()
-    ax_casc.grid(True, axis='y', alpha=0.2)
+    ax_casc.grid(True, axis="y", alpha=0.2)
 
     # --- 4C: Volume Distribution V ---
     ax_vol = axes[2]
     data_V, lbls_V, cols_V = prepare_hist_data("volumes")
-    
+
     if data_V:
         ax_vol.hist(
             data_V,
@@ -299,14 +315,14 @@ def generar_figura_4(results_dict):
             label=lbls_V,
             color=cols_V,
             density=True,
-            histtype='bar' # Side-by-side bars
+            histtype="bar",  # Side-by-side bars
         )
-        
+
     ax_vol.set_title("(c) Distribution of transaction volume $V$")
     ax_vol.set_xlabel("Total IB Transaction Volume")
     ax_vol.set_ylabel("Frequency (Density)")
     ax_vol.legend()
-    ax_vol.grid(True, axis='y', alpha=0.2)
+    ax_vol.grid(True, axis="y", alpha=0.2)
 
     plt.tight_layout()
     plt.savefig("output_data/graficas_finales/figura4_completa.png", dpi=300)
