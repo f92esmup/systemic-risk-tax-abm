@@ -7,9 +7,8 @@ from parametros import Param as p
 # Importación de Módulos de Lógica
 from logica.paso1 import paso1
 from logica.paso2 import paso2_mercado_credito, paso2_interbancario
-
-# Importamos la función con el nombre correcto que definiste en tu archivo paso3.py
 from logica.paso3 import paso3_produccion_y_mercado_laboral
+from logica.paso4 import paso4_consumo
 
 # Semilla para reproducibilidad
 np.random.seed(42)
@@ -24,6 +23,7 @@ firm_ids = np.arange(p.F)
 firm_prices = np.random.uniform(0.9, 1.1, p.F)  # P_i(t-1)
 firm_produccion = np.random.uniform(8, 12, p.F)  # Y_i(t-1)
 firm_ventas = firm_produccion * np.random.uniform(0.8, 1.0, p.F)  # S_i(t-1)
+firm_inventario = np.maximum(firm_produccion - firm_ventas, 0)
 firm_liquidez = np.random.uniform(100, 200, p.F)  # L_i(t-1)
 firm_deuda = np.random.uniform(0, 50, p.F)  # Deuda externa inicial
 
@@ -195,6 +195,43 @@ else:
     print("   [Info] Todas las empresas cumplieron sus objetivos de producción.")
 
 # ==========================================
-# FIN POR AHORA (PASO 4 EN ESPERA)
+# PASO 4: CONSUMO (HOGARES COMPRAN BIENES)
 # ==========================================
-print("\n--- Simulación detenida antes del Paso 4 ---")
+print("\n>>> EJECUTANDO PASO 4: Consumo (Mercado de Bienes)...")
+
+(
+    firm_ventas_reales,  # S_i(t)
+    firm_inventario_final,  # Stock para t+1
+    firm_ingresos,  # Flujo de caja
+    hogares_liquidez,  # Ahorro post-consumo
+    hogares_gasto_total,  # Check
+) = paso4_consumo(
+    hogares_liquidez,
+    nuevos_precios,  # P_i(t) fijados en Paso 1
+    firm_produccion_real,  # Y_i(t) producidos en Paso 3
+    firm_inventario,  # Inventario que venía de t-1
+)
+
+# --- Actualización de Estado (Firms) ---
+firm_liquidez += firm_ingresos  # Entra dinero a la caja
+
+# Preparamos variables para la siguiente iteración (t+1)
+# En t+1, el Paso 1 usará estas ventas y este inventario para decidir precios.
+firm_ventas = firm_ventas_reales
+firm_inventario = firm_inventario_final
+
+# --- Verificación Paso 4 ---
+pib_gasto = np.sum(firm_ingresos)
+stock_sobrante = np.sum(firm_inventario_final)
+print(
+    f"   [Result] Ventas Totales (PIB): {pib_gasto:.2f} (Stock sobrante: {stock_sobrante:.2f})"
+)
+
+# Check de consistencia: Racionamiento
+demanda_potencial = np.sum(
+    hogares_gasto_total / np.minimum(1.0, paso4_consumo.__defaults__ if False else 1)
+)  # Approx
+if stock_sobrante < 1e-5 and pib_gasto > 0:
+    print("   [Info] Mercado 'vaciado' (Todo el stock vendido).")
+elif stock_sobrante > 0:
+    print("   [Info] Exceso de Oferta: Quedó inventario sin vender.")

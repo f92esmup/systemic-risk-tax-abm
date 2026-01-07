@@ -17,4 +17,6 @@
    [Check Contable] OK: Salarios pagados por empresas = Recibidos por hogares.
    [Info] 100 empresas produjeron menos de lo planeado (Falta de liquidez o de mano de obra).
 
---- Simulación detenida antes del Paso 4 ---
+>>> EJECUTANDO PASO 4: Consumo (Mercado de Bienes)...
+   [Result] Ventas Totales (PIB): 176.18 (Stock sobrante: 5.36)
+   [Info] Exceso de Oferta: Quedó inventario sin vender.
