@@ -30,7 +30,7 @@ firm_deuda = np.random.uniform(0, 50, p.F)  # Deuda externa inicial
 
 # --- 0.2 Variables de Bancos (Banks) ---
 bancos_ids = np.arange(p.B)
-bancos_liquidez = np.random.uniform(200, 1000, p.B)
+bancos_liquidez = np.random.uniform(20, 100, p.B)
 bancos_patrimonio = np.random.uniform(50, 100, p.B)  # Equity (C_j)
 bancos_depositos = np.random.uniform(500, 2000, p.B)  # Depósitos de clientes
 
@@ -318,3 +318,36 @@ print("\n>>> EJECUTANDO PASO 5: Resultados Financieros y Quiebras...")
 
 print(f"   [Result] Quiebras de Empresas: {num_quiebras_firmas}")
 print(f"   [Result] Quiebras de Bancos: {num_quiebras_bancos}")
+
+# ==========================================
+# PASO 6: REPAGO DE DEUDA (AMORTIZACIÓN)
+# ==========================================
+print("\n>>> EJECUTANDO PASO 6: Repago de Deuda (Tasa tau)...")
+from logica.paso6 import paso6_repago_deuda
+
+(
+    firm_liquidez,
+    bancos_liquidez,
+    matriz_prestamos_firmas,
+    matriz_intereses_firmas,
+    matriz_interbancaria_anterior,
+    matriz_intereses_ib,
+    total_repagado_firmas,
+    total_repagado_ib
+) = paso6_repago_deuda(
+    firm_liquidez,
+    matriz_prestamos_firmas,
+    matriz_intereses_firmas,
+    bancos_liquidez,
+    matriz_interbancaria_anterior,
+    matriz_intereses_ib,
+    p.tau # 0.05
+)
+
+# Actualizar deuda total escalar (para logs y paso 2 futuro)
+firm_deuda = np.sum(matriz_prestamos_firmas, axis=1)
+bancos_deuda_acumulada = np.sum(matriz_interbancaria_anterior, axis=1)
+
+print(f"   [Result] Total Amortizado por Empresas: {total_repagado_firmas:.2f}")
+print(f"   [Result] Total Amortizado Interbancario: {total_repagado_ib:.2f}")
+print(f"   [Estado] Deuda Total Empresas Remanente: {np.sum(firm_deuda):.2f}")
