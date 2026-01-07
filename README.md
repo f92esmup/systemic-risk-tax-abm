@@ -1,6 +1,11 @@
 # systemic-risk-tax-abm
 
-# TODO: Tengo que crear un script que genere los tres grafos representativos del modelo. El interbancario, el banco-firma, el firma-hogares y el hogares-banco.
+En principio voy a organizarlo de la siguientte manera:
 
-Además, me gustaría poder generar un gift de la dinámica del grafo que se genera. 
+* output/ -> carpeta donde se guardan los resultados de las simulaciones.
+* main.py -> script principal que ejecuta las simulaciones.
+* CRISIS/ -> Carpeta con los 7 pasos iterativos, cada uno en un script diferente.
+* parametros.py -> archivo con los parámetros del modelo.
+
+Esta es la estructura inicial.
 
