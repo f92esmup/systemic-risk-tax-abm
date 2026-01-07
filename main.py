@@ -17,7 +17,7 @@ firm_ventas = firm_produccion * np.random.uniform(0.8, 1.0, p.F)  # S_i(t -1).
 firm_liquidez = np.random.uniform(100, 200, p.F)  # L_i(t -1). Liquidez inicial.
 
 # Ahora procdemos con el paso 1.
-new_prices, demanda_trabajo, demanda_esperada, factura_esperada_salarial = paso1(
+nuevos_precios, demanda_trabajo, demanda_esperada, factura_esperada_salarial = paso1(
     firm_prices, firm_produccion, firm_ventas
 )
 print(" --- Resultados Paso 1 --- ")
@@ -31,7 +31,7 @@ if len(idx_example) > 0:
     idx = idx_example[0]
     print(f"Empresa {idx} tenía inventario y era cara.")
     print(
-        f"Precio anterior: {firm_prices[idx]:.4f}, Nuevo precio: {new_prices[idx]:.4f}"
+        f"Precio anterior: {firm_prices[idx]:.4f}, Nuevo precio: {nuevos_precios[idx]:.4f}"
     )
     print(
         f"Demanda esperada: {demanda_esperada[idx]:.4f}, Producción anterior: {firm_produccion[idx]:.4f}"
