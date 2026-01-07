@@ -1,0 +1,20 @@
+--- [INIT] Inicializando Simulación (t-1) ---
+   > Empresas: 100, Bancos: 20, Hogares: 1300 (1180 trabajadores)
+
+>>> EJECUTANDO PASO 1: Planificación (Precios y Cantidades)...
+   [Check Lógica] Empresa 1 (Stock alto/Cara): Precio 1.09 -> 1.04
+
+>>> EJECUTANDO PASO 2: Mercado de Crédito y Bancos...
+   [Check] Solicitudes de Crédito: 4
+   [Check] Préstamos Otorgados: 4
+   [Check] Transacciones Interbancarias: 0
+
+>>> EJECUTANDO PASO 3: Producción y Nóminas (Hire/Fire)...
+   [Result] Producción Total del Sistema: 90.10
+   [Result] Empleo Total: 901 / 1180 trabajadores
+   [Result] Tasa de Desempleo: 23.64%
+   [Result] Masa Salarial Total Pagada: 901.00
+   [Check Contable] OK: Salarios pagados por empresas = Recibidos por hogares.
+   [Info] 100 empresas produjeron menos de lo planeado (Falta de liquidez o de mano de obra).
+
+--- Simulación detenida antes del Paso 4 ---

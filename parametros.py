@@ -31,3 +31,7 @@ class Param:
     TAX_MODE = "SRT"  # Opcione: SRT, NONE, TOBIN.
     TOBIN_RATE = 0.002  # tasa fija.
     ZETA = 0.02  # factor de proporcionalidad para SRT.
+
+    # Parámetros de hogares:
+    c = 0.8  # Propensión al consumo.
+    z = 2  # Número de empresas que compara cada hogarñ
