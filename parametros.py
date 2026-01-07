@@ -9,14 +9,14 @@ class Param:
     F = 100  # Número de empresas
     H = 1300  # Número de hogares
 
-    alpha = 1.2  # Productividad laboral (Margin booster: Coste unitario ~0.83)
-    w_base = 1.0  # Tasa salarial base.
+    alpha = 1.2  # Productividad laboral (Revertido para estabilidad macro)
+    w_base = 1.0  # Tasa salarial base (Paper Table I)
 
-    SENSIBILIDAD_AJUSTE = 0.05  # Sensibilidad de ajuste de precios y cantidades.
+    SENSIBILIDAD_AJUSTE = 0.05  # Volatilidad moderada.
 
     # Parámetros necesarios para el Mercado Crediticio.
     n_bancos = 5  # numero de bancos que visita cada empresa.
-    r_bar = 0.02  # Tasa de refinanciación bancaria.
+    r_bar = 0.03  # Tasa intermedia.
     phi = 0.8  # Contracción de demanda si la tasa es alta.
     r_max = 0.10  # Tasa umbral máxima.
 
@@ -28,7 +28,7 @@ class Param:
     psi_max = 0.1  # Máxima especificidad del banco prrestamista (uniforme 0-psi_max).
 
     # Parámetros de impuestos:
-    TAX_MODE = "SRT"  # Opcione: SRT, NONE, TOBIN.
+    TAX_MODE = "NONE"  # Opcione: SRT, NONE, TOBIN.
     TOBIN_RATE = 0.002  # tasa fija.
     ZETA = 0.02  # factor de proporcionalidad para SRT.
 
