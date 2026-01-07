@@ -16,39 +16,41 @@ from logica.paso7 import paso7_cierre_y_metricas
 
 # Configuración de Tiempo
 T_STEPS = 500
+N_RUNS = 100  # Número de ejecuciones Monte CarloN_RUNS = 10 # Número de ejecuciones Monte Carlo
 
-def run_simulation(mode_name):
+
+def run_simulation(mode_name, run_id=0):
     print(f"\n==========================================")
-    print(f"--- INICIANDO SIMULACIÓN: MODO {mode_name} ---")
+    print(f"--- INICIANDO SIMULACIÓN: MODO {mode_name} (Run {run_id}) ---")
     print(f"==========================================\n")
-    
+
     # Configurar modo en Parametros
     p.TAX_MODE = mode_name
 
     # ==========================================
     # 0. INICIALIZACIÓN DEL ESTADO (t=0)
     # ==========================================
-    
+
     # MACRO: Estable pero competitiva
     firm_ids = np.arange(p.F)
-    firm_prices = np.random.uniform(1.0, 1.2, p.F) 
-    firm_produccion = np.random.uniform(5.0, 8.0, p.F) 
+    firm_prices = np.random.uniform(1.0, 1.2, p.F)
+    firm_produccion = np.random.uniform(5.0, 8.0, p.F)
     firm_ventas = firm_produccion * np.random.uniform(0.9, 1.0, p.F)
     firm_inventario = np.maximum(firm_produccion - firm_ventas, 0)
 
     # Liquidez FIRMAS: Tensa pero sobrevivible (cubre ~5-10 salarios)
-    firm_liquidez = np.random.uniform(80, 150, p.F) 
-    
+    firm_liquidez = np.random.uniform(80, 150, p.F)
+
     # Deuda FIRMAS: Alta (40-80). Pago intereses ~ 2-4.
     firm_deuda_inicial_total = np.random.uniform(40, 80, p.F)
 
     # BANCOS: Zona de Riesgo "Ricitos de Oro"
     bancos_ids = np.arange(p.B)
-    bancos_liquidez = np.random.uniform(500, 1000, p.B) 
-    
+    bancos_liquidez = np.random.uniform(500, 1000, p.B)
+
     # Capital: 12-25. Suficiente para absorber un par de impagos pequeños,
     # pero vulnerable a un impago grande (Interbancario > 15).
-    bancos_patrimonio = np.random.uniform(12, 25, p.B) 
+    bancos_patrimonio = np.random.uniform(12, 25, p.B)
     bancos_depositos = np.random.uniform(1000, 2000, p.B)
 
     # Red Interbancaria: Peligrosa
@@ -57,8 +59,8 @@ def run_simulation(mode_name):
     matriz_prestamos_firmas = np.zeros((p.F, p.B))
     matriz_intereses_firmas = np.zeros((p.F, p.B))
 
-    mask_deuda = np.random.rand(p.B, p.B) > 0.70 
-    # Exposiciones grandes (10-30). Si un banco debe 30 y quiebra, 
+    mask_deuda = np.random.rand(p.B, p.B) > 0.70
+    # Exposiciones grandes (10-30). Si un banco debe 30 y quiebra,
     # arrastra a un acreedor con capital 20.
     matriz_interbancaria[mask_deuda] = np.random.uniform(10, 30, np.sum(mask_deuda))
     np.fill_diagonal(matriz_interbancaria, 0)
@@ -74,7 +76,7 @@ def run_simulation(mode_name):
 
     # Hogares
     hogares_ids = np.arange(p.H)
-    hogares_liquidez = np.random.uniform(15, 30, p.H) 
+    hogares_liquidez = np.random.uniform(15, 30, p.H)
     hogares_es_trabajador = np.ones(p.H, dtype=bool)
     indices_duenos = np.arange(p.F + p.B)
     hogares_es_trabajador[indices_duenos] = False
@@ -96,7 +98,7 @@ def run_simulation(mode_name):
         "quiebras_bancos": [],
         "deuda_privada": [],
         "fondo_rescate": [],
-        "sr_total": [] 
+        "sr_total": [],
     }
 
     # ==========================================
@@ -112,12 +114,21 @@ def run_simulation(mode_name):
         # PASO 2
         firm_deuda_actual = np.sum(matriz_prestamos_firmas, axis=1)
         contratos_potenciales, demanda_credito_empresas = paso2_mercado_credito(
-            firm_ids, firm_liquidez, firm_deuda_actual, factura_esperada_salarial, bancos_ids,
+            firm_ids,
+            firm_liquidez,
+            firm_deuda_actual,
+            factura_esperada_salarial,
+            bancos_ids,
         )
         nuevos_prestamos_ib, contratos_finales_empresas, bancos_liquidez = (
             paso2_interbancario(
-                bancos_ids, bancos_liquidez, bancos_patrimonio, bancos_depositos,
-                bancos_deuda_acumulada, contratos_potenciales, matriz_interbancaria,
+                bancos_ids,
+                bancos_liquidez,
+                bancos_patrimonio,
+                bancos_depositos,
+                bancos_deuda_acumulada,
+                contratos_potenciales,
+                matriz_interbancaria,
                 tax_mode=p.TAX_MODE,
             )
         )
@@ -149,20 +160,33 @@ def run_simulation(mode_name):
             tax_vals = amounts * tax_rates
             fondo_rescate_acumulado += np.sum(tax_vals)
             np.add.at(bancos_liquidez, borrowers, -tax_vals)
-            for l, b, tot, intr in zip(lenders, borrowers, total_lender, interest_lender):
+            for l, b, tot, intr in zip(
+                lenders, borrowers, total_lender, interest_lender
+            ):
                 matriz_interbancaria[b, l] += tot
                 matriz_intereses_ib[b, l] += intr
 
         # PASO 3
-        (firm_produccion_real, firm_trabajadores_reales, firm_coste_salarial,
-         hogares_ingresos_nomina, firm_liquidez, hogares_empleo_estado) = paso3_produccion_y_mercado_laboral(
+        (
+            firm_produccion_real,
+            firm_trabajadores_reales,
+            firm_coste_salarial,
+            hogares_ingresos_nomina,
+            firm_liquidez,
+            hogares_empleo_estado,
+        ) = paso3_produccion_y_mercado_laboral(
             demanda_trabajo, firm_liquidez, hogares_empleo_estado, hogares_es_trabajador
         )
         hogares_liquidez += hogares_ingresos_nomina
 
         # PASO 4
-        (firm_ventas_reales, firm_inventario_final, firm_ingresos,
-         hogares_liquidez, hogares_gasto_total) = paso4_consumo(
+        (
+            firm_ventas_reales,
+            firm_inventario_final,
+            firm_ingresos,
+            hogares_liquidez,
+            hogares_gasto_total,
+        ) = paso4_consumo(
             hogares_liquidez, nuevos_precios, firm_produccion_real, firm_inventario
         )
         firm_liquidez += firm_ingresos
@@ -172,29 +196,70 @@ def run_simulation(mode_name):
         obligacion_f = deuda_total_f * p.tau
         indices_quiebra_detectados = np.where((firm_liquidez - obligacion_f) < -1e-5)[0]
 
-        (firm_liquidez, bancos_patrimonio, bancos_liquidez, bancos_activos,
-         matriz_prestamos_firmas, matriz_interbancaria, hogares_liquidez,
-         num_quiebras_firmas, num_quiebras_bancos) = paso5_resultados_y_quiebras(
-            firm_liquidez, firm_ingresos, firm_coste_salarial, firm_costo_financiero_iteracion,
-            matriz_prestamos_firmas, matriz_intereses_firmas, bancos_liquidez, bancos_patrimonio,
-            matriz_interbancaria, matriz_intereses_ib, hogares_liquidez,
-            np.arange(p.F), np.arange(p.F, p.F + p.B), fondo_rescate_acumulado, p.tau,
+        (
+            firm_liquidez,
+            bancos_patrimonio,
+            bancos_liquidez,
+            bancos_activos,
+            matriz_prestamos_firmas,
+            matriz_interbancaria,
+            hogares_liquidez,
+            num_quiebras_firmas,
+            num_quiebras_bancos,
+        ) = paso5_resultados_y_quiebras(
+            firm_liquidez,
+            firm_ingresos,
+            firm_coste_salarial,
+            firm_costo_financiero_iteracion,
+            matriz_prestamos_firmas,
+            matriz_intereses_firmas,
+            bancos_liquidez,
+            bancos_patrimonio,
+            matriz_interbancaria,
+            matriz_intereses_ib,
+            hogares_liquidez,
+            np.arange(p.F),
+            np.arange(p.F, p.F + p.B),
+            fondo_rescate_acumulado,
+            p.tau,
         )
 
         # PASO 6
-        (firm_liquidez, bancos_liquidez, matriz_prestamos_firmas, matriz_intereses_firmas,
-         matriz_interbancaria, matriz_intereses_ib, repago_f, repago_b) = paso6_repago_deuda(
-            firm_liquidez, matriz_prestamos_firmas, matriz_intereses_firmas, bancos_liquidez,
-            matriz_interbancaria, matriz_intereses_ib, p.tau,
+        (
+            firm_liquidez,
+            bancos_liquidez,
+            matriz_prestamos_firmas,
+            matriz_intereses_firmas,
+            matriz_interbancaria,
+            matriz_intereses_ib,
+            repago_f,
+            repago_b,
+        ) = paso6_repago_deuda(
+            firm_liquidez,
+            matriz_prestamos_firmas,
+            matriz_intereses_firmas,
+            bancos_liquidez,
+            matriz_interbancaria,
+            matriz_intereses_ib,
+            p.tau,
         )
 
         # PASO 7
         firm_deuda_actual = np.sum(matriz_prestamos_firmas, axis=1)
         (firm_prices, firm_produccion, firm_ventas, firm_inventario, metricas) = (
             paso7_cierre_y_metricas(
-                indices_quiebra_detectados, firm_ids, nuevos_precios, firm_produccion_real,
-                firm_ventas_reales, firm_inventario_final, firm_liquidez, firm_deuda_actual,
-                bancos_activos, fondo_rescate_acumulado, firm_trabajadores_reales, hogares_es_trabajador,
+                indices_quiebra_detectados,
+                firm_ids,
+                nuevos_precios,
+                firm_produccion_real,
+                firm_ventas_reales,
+                firm_inventario_final,
+                firm_liquidez,
+                firm_deuda_actual,
+                bancos_activos,
+                fondo_rescate_acumulado,
+                firm_trabajadores_reales,
+                hogares_es_trabajador,
             )
         )
 
@@ -211,7 +276,7 @@ def run_simulation(mode_name):
                 f"Fondo: {metricas['fondo_rescate']:5.2f}"
             )
 
-    filename = f"output_{mode_name}.txt"
+    filename = f"output_{mode_name}_run{run_id}.txt"
     with open(filename, "w") as f:
         f.write("Step,PIB,Desempleo,QuiebrasF,BancosMuertos,FondoRescate\n")
         for t in range(T_STEPS):
@@ -223,14 +288,34 @@ def run_simulation(mode_name):
     print(f"Resultados guardados en '{filename}'")
     return historia
 
-modes = ["NONE", "TOBIN", "SRT"]
-results = {}
-for m in modes:
-    results[m] = run_simulation(m)
 
-print("\n=== COMPARACIÓN FINAL (PIB Medio ultimos 50 pasos) ===")
+modes = ["NONE", "TOBIN", "SRT"]
+monte_carlo_results = {m: [] for m in modes}
+
 for m in modes:
-    pib_medio = np.mean(results[m]["pib"][-50:])
-    muertos = results[m]["quiebras_bancos"][-1]
-    fondo = results[m]["fondo_rescate"][-1]
-    print(f"Modo {m:6s}: PIB ~ {pib_medio:.2f} | Bancos Muertos: {muertos:2d} | Fondo: {fondo:.2f}")
+    for r in range(N_RUNS):
+        # print(f"--- Ejecutando {m} - Run {r+1}/{N_RUNS} ---") # Ya se imprime dentro de run_simulation
+        sim_data = run_simulation(m, run_id=r)
+        monte_carlo_results[m].append(sim_data)
+
+print("\n=== RESULTADOS MONTE CARLO (Promedios Finales) ===")
+for m in modes:
+    runs = monte_carlo_results[m]
+    # Promedio del PIB de los ultimos 50 pasos, promediado entre runs
+    pib_finales = [np.mean(h["pib"][-50:]) for h in runs]
+    muertos_finales = [h["quiebras_bancos"][-1] for h in runs]
+    fondos_finales = [h["fondo_rescate"][-1] for h in runs]
+
+    print(f"Modo {m:6s}:")
+    print(
+        f"  PIB (ult 50): Media {np.mean(pib_finales):.2f} | Std {np.std(pib_finales):.2f}"
+    )
+    print(
+        f"  Bancos Muertos: Media {np.mean(muertos_finales):.2f} | Std {np.std(muertos_finales):.2f}"
+    )
+    print(
+        f"  Fondo Rescate: Media {np.mean(fondos_finales):.2f} | Std {np.std(fondos_finales):.2f}"
+    )
+    print(
+        f"  Fondo Rescate: Media {np.mean(fondos_finales):.2f} | Std {np.std(fondos_finales):.2f}"
+    )
