@@ -4,55 +4,62 @@ import numpy as np
 
 
 def calcular_impacto_sr(
-    deudor_idx,
-    prestamista_idx,
-    monto,
-    matriz_L_actual,
-    patrimonio_bancos,
-    depositos_bancos,
-    deuda_previa_bancos,
+    banco_deudor_id,
+    banco_acreedor_id,
+    monto_prestamo,
+    matriz_interbancaria,
+    bancos_patrimonio,
+    bancos_depositos,
+    bancos_deuda_acumulada,
 ):
     """
-    Calcula el termino exacto del SRT (Ecuación 5 del paper).
-    SRT = Zeta * max(0, EL_post - EL_pre)
-    Donde EL (Euros) = V_total * Sum(p_i * R_i)
+    Calcula el Impuesto de Riesgo Sistémico (SRT) para una transacción específica.
+    Implementa la Ecuación 5 del paper comparando el escenario PRE y POST préstamo.
+
+    Retorna:
+        delta_el_euros (float): El incremento monetario en la Pérdida Esperada.
     """
 
-    # --- ESCENARIO 1: PRE (Sin el préstamo) ---
+    # --- ESCENARIO 1: PRE (Situación actual sin el nuevo préstamo) ---
 
-    # 1. p_default PRE
-    pasivo_pre = depositos_bancos + deuda_previa_bancos
-    leverage_pre = pasivo_pre / np.maximum(patrimonio_bancos, 1e-9)
-    p_default_pre = 0.01 * np.tanh(leverage_pre)  # [Apéndice A.3]
+    # 1. Probabilidad de Default (p_i) PRE
+    pasivo_total_pre = bancos_depositos + bancos_deuda_acumulada
+    # Evitamos div por cero
+    patrimonio_seguro = np.maximum(bancos_patrimonio, 1e-9)
 
-    # 2. DebtRank y V PRE
-    R_pre, V_pre = calcular_debtrank(matriz_L_actual, patrimonio_bancos)
+    leverage_pre = pasivo_total_pre / patrimonio_seguro
+    # Fórmula Apéndice A.3: p = 0.01 * tanh(leverage)
+    p_default_pre = 0.01 * np.tanh(leverage_pre)
 
-    # 3. EL Total PRE (Euros) [Ec 1 y E5]
-    EL_euros_pre = V_pre * np.sum(p_default_pre * R_pre)
+    # 2. DebtRank y Valor Total PRE
+    R_pre, V_total_pre = calcular_debtrank(matriz_interbancaria, bancos_patrimonio)
 
-    # --- ESCENARIO 2: POST (Con el préstamo hipotético) ---
+    # 3. Pérdida Sistémica Esperada (EL) PRE en Euros [Ec 1]
+    # EL = Sum(p_i * R_i * V_total)
+    EL_euros_pre = V_total_pre * np.sum(p_default_pre * R_pre)
 
-    # 1. Actualizar Matriz L
-    matriz_L_post = matriz_L_actual.copy()
-    matriz_L_post[deudor_idx, prestamista_idx] += monto
+    # --- ESCENARIO 2: POST (Situación hipotética con el préstamo) ---
 
-    # 2. p_default POST (El deudor aumenta su pasivo)
-    deuda_post = deuda_previa_bancos.copy()
-    deuda_post[deudor_idx] += monto  # Solo cambia el deudor
+    # 1. Actualizar Matriz Interbancaria (Copia temporal)
+    matriz_post = matriz_interbancaria.copy()
+    matriz_post[banco_deudor_id, banco_acreedor_id] += monto_prestamo
 
-    leverage_post = (depositos_bancos + deuda_post) / np.maximum(
-        patrimonio_bancos, 1e-9
-    )
+    # 2. Actualizar Probabilidad de Default POST
+    # El deudor aumenta su pasivo, por tanto aumenta su apalancamiento y su riesgo.
+    deuda_acumulada_post = bancos_deuda_acumulada.copy()
+    deuda_acumulada_post[banco_deudor_id] += monto_prestamo
+
+    pasivo_total_post = bancos_depositos + deuda_acumulada_post
+    leverage_post = pasivo_total_post / patrimonio_seguro
     p_default_post = 0.01 * np.tanh(leverage_post)
 
-    # 3. DebtRank y V POST
-    R_post, V_post = calcular_debtrank(matriz_L_post, patrimonio_bancos)
+    # 3. DebtRank y Valor Total POST
+    R_post, V_total_post = calcular_debtrank(matriz_post, bancos_patrimonio)
 
-    # 4. EL Total POST (Euros)
-    EL_euros_post = V_post * np.sum(p_default_post * R_post)
+    # 4. Pérdida Sistémica Esperada (EL) POST en Euros
+    EL_euros_post = V_total_post * np.sum(p_default_post * R_post)
 
-    # --- CÁLCULO DEL DELTA ---
+    # --- RESULTADO FINAL (El delta marginal) ---
     delta_el_euros = max(0.0, EL_euros_post - EL_euros_pre)
 
     return delta_el_euros
@@ -81,7 +88,7 @@ def calcular_debtrank(matriz_L, patrimonio):
     V_total = np.sum(total_pasivos)
 
     if V_total == 0:
-        return 0.0, np.zeros(B)
+        return np.zeros(B), 0.0
 
     v = total_pasivos / V_total
 

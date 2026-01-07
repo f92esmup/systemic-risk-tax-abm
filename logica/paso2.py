@@ -105,9 +105,10 @@ def paso2_interbancario(
             demanda_por_banco[b_idx] += monto
 
     # 2. Identificar bancos con déficit y superávit
-    # balance_liquidez = bancos_liquidez - demanda_por_banco
-    deficit_ids = bancos_ids[bancos_liquidez < 0]  # Necesitan pedir
-    superavit_ids = bancos_ids[bancos_liquidez > 0]  # Pueden prestar
+    balance_liquidez = bancos_liquidez - demanda_por_banco
+
+    deficit_ids = bancos_ids[balance_liquidez < -1e-5]
+    superavit_ids = bancos_ids[balance_liquidez > 1e-5]
 
     # 3. Cálculo de Fragilidad Financiera
     # Referencia Appendix A.2:
@@ -131,7 +132,7 @@ def paso2_interbancario(
     # Los bancos deficitarios buscan cubrir su hueco
 
     for banco_deudor in deficit_ids:
-        necesidad = abs(bancos_liquidez[banco_deudor])
+        necesidad = abs(balance_liquidez[banco_deudor])
         monto_conseguido = 0
 
         if len(superavit_ids) == 0:
@@ -158,16 +159,20 @@ def paso2_interbancario(
                 # A7: r_total = r + SRT / loan_size
                 # Calculamos el SRT específico para esta transacción potencial
                 monto_potencial = min(disponible_j, necesidad)
-                if (
-                    monto_potencial > 1e-5
-                ):  # NO USO CERO para evitar pequeñas variaciones.
-                    impacto_sr = calcular_impacto_sr(
-                        banco_deudor,
-                        banco_acreedor,
-                        monto_potencial,
-                        matriz_interbancaria_anterior,
+
+                if monto_potencial > 1e-5:
+                    # Pasamos TODOS los argumentos necesarios para calcular p_default y V
+                    impacto_euros_sr = calcular_impacto_sr(
+                        banco_deudor,  # borrower_idx
+                        banco_acreedor,  # lender_idx
+                        monto_potencial,  # amount
+                        matriz_interbancaria_anterior,  # matriz_L_actual
+                        bancos_patrimonio,  # patrimonio_bancos
+                        bancos_depositos,  # depositos_bancos
+                        bancos_deuda_acumulada,  # deuda_previa_bancos
                     )
-                    impuesto_adicional = (p.ZETA * impacto_sr) / monto_potencial
+
+                    impuesto_adicional = (p.ZETA * impacto_euros_sr) / monto_potencial
 
             elif tax_mode == "TOBIN":
                 # A6: r_total = r + 0.002
