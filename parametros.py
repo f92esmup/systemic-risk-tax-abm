@@ -34,4 +34,7 @@ class Param:
 
     # Parámetros de hogares:
     c = 0.8  # Propensión al consumo.
-    z = 2  # Número de empresas que compara cada hogarñ
+    z = 2  # Número de empresas que compara cada hogar
+
+    # Parámetros de amortización:
+    tau = 0.05  # 5% de la deuda se amortiza en cada periodo (Table I)

@@ -9,6 +9,7 @@ from logica.paso1 import paso1
 from logica.paso2 import paso2_mercado_credito, paso2_interbancario
 from logica.paso3 import paso3_produccion_y_mercado_laboral
 from logica.paso4 import paso4_consumo
+from logica.paso5 import paso5_resultados_y_quiebras
 
 # Semilla para reproducibilidad
 np.random.seed(42)
@@ -35,6 +36,15 @@ bancos_depositos = np.random.uniform(500, 2000, p.B)  # Depósitos de clientes
 
 # Deuda interbancaria inicial (Matriz L)
 matriz_interbancaria_anterior = np.zeros((p.B, p.B))
+# Acumulador del Fondo de Rescate (SRT recaudado)
+fondo_rescate_acumulado = 0.0
+# Variables de Estado para Deuda Detallada
+# Matriz Préstamos Total (Principal + Interés)
+matriz_prestamos_firmas = np.zeros((p.F, p.B))
+# Matriz SOLO Intereses (Para cálculo de beneficios Paso 5)
+matriz_intereses_firmas = np.zeros((p.F, p.B))
+# Matriz Intereses Interbancarios
+matriz_intereses_ib = np.zeros((p.B, p.B))
 # Generamos algunas deudas iniciales para probar DebtRank
 mask_deuda = np.random.rand(p.B, p.B) > 0.8
 matriz_interbancaria_anterior[mask_deuda] = np.random.uniform(1, 10, np.sum(mask_deuda))
@@ -116,13 +126,29 @@ nuevos_prestamos_ib, contratos_finales_empresas, bancos_liquidez_final = (
 
 # --- Actualización de Liquidez Empresarial (Post-Crédito) ---
 # Sumamos el dinero prestado a la caja de las empresas ANTES de pagar nóminas
+firm_costo_financiero_iteracion = np.zeros(p.F)  # Reset para este paso
+
 if len(contratos_finales_empresas) > 0:
-    indices = contratos_finales_empresas[:, 0].astype(int)  # IDs Empresas
+    indices_f = contratos_finales_empresas[:, 0].astype(int)  # IDs Empresas
+    indices_b = contratos_finales_empresas[:, 1].astype(int)
     montos = contratos_finales_empresas[:, 2]  # Cantidad prestada
+    tasas = contratos_finales_empresas[:, 3]
+
+    # Intereses de estos contratos
+    intereses_nuevos = montos * tasas
+    deuda_total = montos + intereses_nuevos
 
     # Actualizamos Liquidez y Deuda
-    np.add.at(firm_liquidez, indices, montos)
-    np.add.at(firm_deuda, indices, montos)
+    np.add.at(firm_liquidez, indices_f, montos)
+    np.add.at(firm_deuda, indices_f, deuda_total)
+    np.add.at(firm_costo_financiero_iteracion, indices_f, intereses_nuevos)
+
+    # Actualizar MATRICES (Bucle rápido)
+    for f, b, d_tot, int_only in zip(
+        indices_f, indices_b, deuda_total, intereses_nuevos
+    ):
+        matriz_prestamos_firmas[f, b] += d_tot
+        matriz_intereses_firmas[f, b] += int_only
 
 # --- Verificación Paso 2 ---
 solicitudes_totales = len(contratos_potenciales)
@@ -134,7 +160,30 @@ if prestamos_reales < solicitudes_totales:
         f"   [Atención] Hubo 'Credit Crunch': {solicitudes_totales - prestamos_reales} préstamos denegados por iliquidez bancaria."
     )
 
+# Actualizar Matriz Interbancaria con Intereses y FONDO DE RESCATE
+if len(nuevos_prestamos_ib) > 0:
+    # Ahora la matriz tiene 5 columnas: [Lender, Borrower, Amount, TotalRate, TaxRate]
+    lenders = nuevos_prestamos_ib[:, 0].astype(int)
+    borrowers = nuevos_prestamos_ib[:, 1].astype(int)
+    amounts = nuevos_prestamos_ib[:, 2]
+    total_rates = nuevos_prestamos_ib[:, 3]
+    tax_rates = nuevos_prestamos_ib[:, 4]  # Nueva Columna
+
+    # Cálculo exacto de intereses y deuda
+    interest_ib = amounts * total_rates
+    total_ib = amounts + interest_ib
+
+    # Cálculo exacto del impuesto recaudado
+    tax_collected = np.sum(amounts * tax_rates)
+    fondo_rescate_acumulado += tax_collected  # Acumulamos en la variable global
+
+    # Sumar a las matrices globales
+    for l, b, tot, intr in zip(lenders, borrowers, total_ib, interest_ib):
+        matriz_interbancaria_anterior[b, l] += tot
+        matriz_intereses_ib[b, l] += intr
+
 print(f"   [Check] Transacciones Interbancarias: {len(nuevos_prestamos_ib)}")
+print(f"   [Check] Fondo de Rescate Acumulado: {fondo_rescate_acumulado:.4f}")
 
 
 # ==========================================
@@ -228,10 +277,44 @@ print(
 )
 
 # Check de consistencia: Racionamiento
-demanda_potencial = np.sum(
-    hogares_gasto_total / np.minimum(1.0, paso4_consumo.__defaults__ if False else 1)
-)  # Approx
+demanda_potencial = np.sum(hogares_gasto_total)
+
 if stock_sobrante < 1e-5 and pib_gasto > 0:
     print("   [Info] Mercado 'vaciado' (Todo el stock vendido).")
 elif stock_sobrante > 0:
     print("   [Info] Exceso de Oferta: Quedó inventario sin vender.")
+
+# ==========================================
+# PASO 5: RESULTADOS, DIVIDENDOS Y QUIEBRAS
+# ==========================================
+print("\n>>> EJECUTANDO PASO 5: Resultados Financieros y Quiebras...")
+
+(
+    firm_liquidez,
+    bancos_patrimonio,
+    bancos_liquidez,
+    bancos_activos,
+    matriz_prestamos_firmas,
+    matriz_interbancaria_anterior,
+    hogares_liquidez,
+    num_quiebras_firmas,
+    num_quiebras_bancos,
+) = paso5_resultados_y_quiebras(
+    firm_liquidez,
+    firm_ingresos,
+    firm_coste_salarial,
+    firm_costo_financiero_iteracion,
+    matriz_prestamos_firmas,
+    matriz_intereses_firmas,  # NUEVO
+    bancos_liquidez,
+    bancos_patrimonio,
+    matriz_interbancaria_anterior,
+    matriz_intereses_ib,  # NUEVO
+    hogares_liquidez,
+    np.arange(p.F),  # Dueños firmas
+    np.arange(p.F, p.F + p.B),  # Dueños bancos
+    fondo_rescate_acumulado,  # NUEVO: Fondo de Rescate
+)
+
+print(f"   [Result] Quiebras de Empresas: {num_quiebras_firmas}")
+print(f"   [Result] Quiebras de Bancos: {num_quiebras_bancos}")
