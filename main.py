@@ -30,8 +30,8 @@ firm_deuda = np.random.uniform(0, 50, p.F)  # Deuda externa inicial
 
 # --- 0.2 Variables de Bancos (Banks) ---
 bancos_ids = np.arange(p.B)
-bancos_liquidez = np.random.uniform(20, 100, p.B)
-bancos_patrimonio = np.random.uniform(50, 100, p.B)  # Equity (C_j)
+bancos_liquidez = np.random.uniform(0, 80, p.B)
+bancos_patrimonio = np.random.uniform(0, 80, p.B)  # Equity (C_j)
 bancos_depositos = np.random.uniform(500, 2000, p.B)  # Depósitos de clientes
 
 # Deuda interbancaria inicial (Matriz L)
@@ -288,6 +288,12 @@ elif stock_sobrante > 0:
 # PASO 5: RESULTADOS, DIVIDENDOS Y QUIEBRAS
 # ==========================================
 print("\n>>> EJECUTANDO PASO 5: Resultados Financieros y Quiebras...")
+from logica.paso5 import paso5_resultados_y_quiebras
+
+# [CRÍTICO] Detectar quiebras ANTES de que el Paso 5 resetee las variables.
+# Una empresa quiebra si su liquidez es negativa.
+# Necesitamos estos índices para el 'Rebirth' del Paso 7.
+indices_quiebra_detectados = np.where(firm_liquidez < -1e-5)[0]
 
 (
     firm_liquidez,
@@ -305,19 +311,24 @@ print("\n>>> EJECUTANDO PASO 5: Resultados Financieros y Quiebras...")
     firm_coste_salarial,
     firm_costo_financiero_iteracion,
     matriz_prestamos_firmas,
-    matriz_intereses_firmas,  # NUEVO
+    matriz_intereses_firmas,
     bancos_liquidez,
     bancos_patrimonio,
     matriz_interbancaria_anterior,
-    matriz_intereses_ib,  # NUEVO
+    matriz_intereses_ib,
     hogares_liquidez,
-    np.arange(p.F),  # Dueños firmas
-    np.arange(p.F, p.F + p.B),  # Dueños bancos
-    fondo_rescate_acumulado,  # NUEVO: Fondo de Rescate
+    np.arange(p.F),
+    np.arange(p.F, p.F + p.B),
+    fondo_rescate_acumulado,
 )
 
 print(f"   [Result] Quiebras de Empresas: {num_quiebras_firmas}")
 print(f"   [Result] Quiebras de Bancos: {num_quiebras_bancos}")
+
+# Validación de integridad
+if len(indices_quiebra_detectados) != num_quiebras_firmas:
+    print("   [Warning] Discrepancia en conteo de quiebras (Check lógica main vs paso5).")
+
 
 # ==========================================
 # PASO 6: REPAGO DE DEUDA (AMORTIZACIÓN)
@@ -350,4 +361,43 @@ bancos_deuda_acumulada = np.sum(matriz_interbancaria_anterior, axis=1)
 
 print(f"   [Result] Total Amortizado por Empresas: {total_repagado_firmas:.2f}")
 print(f"   [Result] Total Amortizado Interbancario: {total_repagado_ib:.2f}")
-print(f"   [Estado] Deuda Total Empresas Remanente: {np.sum(firm_deuda):.2f}")
+
+
+# ==========================================
+# PASO 7: CIERRE Y MÉTRICAS (t -> t+1)
+# ==========================================
+print("\n>>> EJECUTANDO PASO 7: Cierre, Métricas y Renacimiento...")
+from logica.paso7 import paso7_cierre_y_metricas
+
+(
+    firm_prices,          # P_i(t) listo para ser P_i(t-1) en el siguiente loop
+    firm_produccion,      # Y_i(t) listo para ser Y_i(t-1)
+    firm_ventas,          # S_i(t) listo para ser S_i(t-1)
+    firm_inventario,      # Stock remanente
+    metricas_finales
+) = paso7_cierre_y_metricas(
+    indices_quiebra_detectados, # Pasamos los índices que guardamos antes del Paso 5
+    firm_ids,
+    nuevos_precios,       # Precios actuales
+    firm_produccion_real, # Producción actual
+    firm_ventas_reales,   # Ventas actuales
+    firm_inventario_final,# Inventario actual
+    firm_liquidez,
+    firm_deuda,
+    bancos_activos,
+    fondo_rescate_acumulado,
+    firm_trabajadores_reales,
+    hogares_es_trabajador
+)
+
+print("-" * 40)
+print("RESUMEN DE LA ITERACIÓN")
+print("-" * 40)
+print(f"PIB Real (Ventas):     {metricas_finales['pib']:.2f}")
+print(f"Tasa Desempleo:        {metricas_finales['desempleo']*100:.2f}%")
+print(f"Quiebras Firmas:       {metricas_finales['quiebras_firmas']}")
+print(f"Bancos Activos:        {metricas_finales['bancos_vivos']} / {p.B}")
+print(f"Fondo Rescate (SRT):   {metricas_finales['fondo_rescate']:.4f}")
+print(f"Deuda Privada Total:   {metricas_finales['deuda_total']:.2f}")
+print("-" * 40)
+print(">>> FIN DE LA ITERACIÓN (t)")
