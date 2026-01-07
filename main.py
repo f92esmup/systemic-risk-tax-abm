@@ -86,7 +86,7 @@ nuevos_prestamos_ib, contratos_finales_empresas, bancos_liquidez_final = (
 
 print("\n--- Resultados Paso 2 (Verificación) ---")
 num_solicitantes = np.sum(demanda_credito_empresas > 1e-5)
-print(f"1. Demanda de Crédito:")
+print("1. Demanda de Crédito:")
 print(f"   - Empresas que necesitan dinero: {num_solicitantes}")
 print(f"   - Total solicitado: {np.sum(demanda_credito_empresas):.2f}")
 print(f"   - Contratos potenciales (Matching): {len(contratos_potenciales)}")
@@ -105,7 +105,7 @@ if len(nuevos_prestamos_ib) > 0:
 else:
     print("   - No hubo actividad interbancaria (¿Sobra liquidez en el sistema?)")
 
-print(f"3. Resultado Final:")
+print("3. Resultado Final:")
 print(
     f"   - Préstamos a empresas otorgados: {len(contratos_finales_empresas)} de {len(contratos_potenciales)}"
 )
