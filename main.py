@@ -25,12 +25,13 @@ firm_prices = np.random.uniform(0.9, 1.1, p.F)  # P_i(t-1)
 firm_produccion = np.random.uniform(8, 12, p.F)  # Y_i(t-1)
 firm_ventas = firm_produccion * np.random.uniform(0.8, 1.0, p.F)  # S_i(t-1)
 firm_inventario = np.maximum(firm_produccion - firm_ventas, 0)
-firm_liquidez = np.random.uniform(100, 200, p.F)  # L_i(t-1)
-firm_deuda = np.random.uniform(0, 50, p.F)  # Deuda externa inicial
+# Ajuste: Liquidez media y Deuda significativa para probar insolvencia
+firm_liquidez = np.random.uniform(0, 10, p.F)
+firm_deuda = np.random.uniform(200, 400, p.F)
 
 # --- 0.2 Variables de Bancos (Banks) ---
 bancos_ids = np.arange(p.B)
-bancos_liquidez = np.random.uniform(0, 80, p.B)
+bancos_liquidez = np.random.uniform(200, 500, p.B)
 bancos_patrimonio = np.random.uniform(0, 80, p.B)  # Equity (C_j)
 bancos_depositos = np.random.uniform(500, 2000, p.B)  # Depósitos de clientes
 
@@ -41,6 +42,16 @@ fondo_rescate_acumulado = 0.0
 # Variables de Estado para Deuda Detallada
 # Matriz Préstamos Total (Principal + Interés)
 matriz_prestamos_firmas = np.zeros((p.F, p.B))
+
+# INICIALIZACIÓN DE MATRIZ DE DEUDA (CRÍTICO PARA PASO 5)
+# Repartimos la deuda escalar inicial entre los bancos
+for f in range(p.F):
+    monto_total = firm_deuda[f]
+    # Elegimos aleatoriamente 2 bancos acreedores
+    bancos_acreedores = np.random.choice(bancos_ids, 2, replace=False)
+    monto_por_banco = monto_total / 2
+    matriz_prestamos_firmas[f, bancos_acreedores] += monto_por_banco
+
 # Matriz SOLO Intereses (Para cálculo de beneficios Paso 5)
 matriz_intereses_firmas = np.zeros((p.F, p.B))
 # Matriz Intereses Interbancarios
@@ -170,15 +181,22 @@ if len(nuevos_prestamos_ib) > 0:
     tax_rates = nuevos_prestamos_ib[:, 4]  # Nueva Columna
 
     # Cálculo exacto de intereses y deuda
-    interest_ib = amounts * total_rates
-    total_ib = amounts + interest_ib
+    # Separamos el impuesto de la tasa de interés real
+    real_rates = total_rates - tax_rates
+    
+    interest_ib_lender = amounts * real_rates
+    total_ib_lender = amounts + interest_ib_lender
 
     # Cálculo exacto del impuesto recaudado
-    tax_collected = np.sum(amounts * tax_rates)
+    tax_amounts = amounts * tax_rates
+    tax_collected = np.sum(tax_amounts)
     fondo_rescate_acumulado += tax_collected  # Acumulamos en la variable global
+    
+    # El impuesto se paga inmediatamente (se resta de la liquidez del deudor)
+    np.add.at(bancos_liquidez, borrowers, -tax_amounts)
 
-    # Sumar a las matrices globales
-    for l, b, tot, intr in zip(lenders, borrowers, total_ib, interest_ib):
+    # Sumar a las matrices globales (Solo lo que se debe al acreedor)
+    for l, b, tot, intr in zip(lenders, borrowers, total_ib_lender, interest_ib_lender):
         matriz_interbancaria_anterior[b, l] += tot
         matriz_intereses_ib[b, l] += intr
 
@@ -291,9 +309,10 @@ print("\n>>> EJECUTANDO PASO 5: Resultados Financieros y Quiebras...")
 from logica.paso5 import paso5_resultados_y_quiebras
 
 # [CRÍTICO] Detectar quiebras ANTES de que el Paso 5 resetee las variables.
-# Una empresa quiebra si su liquidez es negativa.
-# Necesitamos estos índices para el 'Rebirth' del Paso 7.
-indices_quiebra_detectados = np.where(firm_liquidez < -1e-5)[0]
+# Una empresa quiebra si su liquidez es insuficiente para cubrir la obligación del periodo.
+deuda_total_acumulada = np.sum(matriz_prestamos_firmas, axis=1)
+obligacion_pago = deuda_total_acumulada * p.tau
+indices_quiebra_detectados = np.where((firm_liquidez - obligacion_pago) < -1e-5)[0]
 
 (
     firm_liquidez,
@@ -320,6 +339,7 @@ indices_quiebra_detectados = np.where(firm_liquidez < -1e-5)[0]
     np.arange(p.F),
     np.arange(p.F, p.F + p.B),
     fondo_rescate_acumulado,
+    p.tau,
 )
 
 print(f"   [Result] Quiebras de Empresas: {num_quiebras_firmas}")

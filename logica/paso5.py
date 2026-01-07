@@ -18,14 +18,24 @@ def paso5_resultados_y_quiebras(
     hogares_indices_duenos_firmas,
     hogares_indices_duenos_bancos,
     fondo_rescate_acumulado,
+    tau_param
 ):
     """
     Paso 5: Quiebras con Responsabilidad Personal, Contagio y Dividendos.
     CORREGIDO: Usa flujos de caja (tau) para cálculo de dividendos.
     """
 
-    # --- 1. QUIEBRA DE EMPRESAS ---
-    mascara_quiebra_firmas = firm_liquidez < -1e-5
+    # --- 1. QUIEBRA DE EMPRESAS (NUEVO LOGICA DE FLUJO) ---
+    # La empresa debe pagar 'tau' de su deuda total (Principal + Intereses)
+    deuda_total_firmas = np.sum(matriz_prestamos_firmas, axis=1) # Principal + Intereses
+    obligacion_pago_periodo = deuda_total_firmas * tau_param
+    
+    # Calculamos la liquidez proyectada si pagaran
+    liquidez_proyectada = firm_liquidez - obligacion_pago_periodo
+    
+    # La quiebra se define por la incapacidad de pagar la deuda
+    mascara_quiebra_firmas = liquidez_proyectada < -1e-5
+    
     indices_quiebra_firmas = np.where(mascara_quiebra_firmas)[0]
     indices_firmas_vivas = np.where(~mascara_quiebra_firmas)[0]
 
@@ -68,7 +78,7 @@ def paso5_resultados_y_quiebras(
     beneficio_firmas = np.zeros(p.F)
 
     # CORRECCIÓN FLJO: Gasto financiero es tau * Intereses Totales
-    gasto_financiero_periodo = np.sum(matriz_intereses_firmas, axis=1) * p.tau
+    gasto_financiero_periodo = np.sum(matriz_intereses_firmas, axis=1) * tau_param
 
     beneficio_firmas[indices_firmas_vivas] = (
         firm_ingresos[indices_firmas_vivas]
@@ -114,9 +124,9 @@ def paso5_resultados_y_quiebras(
 
     # --- 4. DIVIDENDOS BANCOS (SOBREVIVIENTES) ---
     # CORRECCIÓN FLUJO: Usamos p.tau para estimar ingreso/gasto del periodo
-    ingresos_intereses_firmas = np.sum(matriz_intereses_firmas, axis=0) * p.tau
-    ingresos_intereses_ib = np.sum(matriz_intereses_ib, axis=0) * p.tau
-    gastos_intereses_ib = np.sum(matriz_intereses_ib, axis=1) * p.tau
+    ingresos_intereses_firmas = np.sum(matriz_intereses_firmas, axis=0) * tau_param
+    ingresos_intereses_ib = np.sum(matriz_intereses_ib, axis=0) * tau_param
+    gastos_intereses_ib = np.sum(matriz_intereses_ib, axis=1) * tau_param
 
     beneficio_operativo = (
         ingresos_intereses_firmas + ingresos_intereses_ib - gastos_intereses_ib
