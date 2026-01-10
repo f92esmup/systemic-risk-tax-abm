@@ -1,6 +1,7 @@
 import numpy as np
 from parametros import Param as p
 
+
 def paso1(
     precios_prev: np.ndarray,
     produccion_prev: np.ndarray,
@@ -25,7 +26,7 @@ def paso1(
         mask_renacidas: Vector booleano (F,) True si la empresa renació en este turno.
 
     Returns:
-        Tupla con (nuevos_precios, demanda_laboral, produccion_necesaria, 
+        Tupla con (nuevos_precios, demanda_laboral, produccion_necesaria,
                    demanda_credito, factura_salarial, demanda_objetivo_total)
     """
 
@@ -60,7 +61,7 @@ def paso1(
     # -------------------------------------------------------------------------
     # "Random variations in operating costs/strategy"
 
-    magnitud_ajuste = np.random.uniform(0.01, p.SENSIBILIDAD_AJUSTE, p.F)
+    magnitud_ajuste = np.random.uniform(p.RANGO_AJUSTE_MIN, p.RANGO_AJUSTE_MAX, p.F)
 
     delta_p = np.zeros(p.F)
     delta_q = np.zeros(p.F)
@@ -111,7 +112,7 @@ def paso1(
     # 5. Tratamiento de Renacidas (Ref [cite: 200])
     # -------------------------------------------------------------------------
     # "Initial estimates for D(t+1) and P(t+1) equals respective current averages"
-    
+
     if np.any(mask_renacidas):
         nuevos_precios[mask_renacidas] = avg_precio_mercado
         demanda_objetivo_total[mask_renacidas] = avg_ventas_mercado
@@ -131,8 +132,8 @@ def paso1(
     produccion_necesaria = np.maximum(produccion_necesaria, 0.0)
 
     # Demanda Laboral (N) = Y / alpha [cite: 208, 214]
-    demanda_laboral = produccion_necesaria / p.alpha
-    factura_salarial = demanda_laboral * p.w_base
+    demanda_laboral = produccion_necesaria / p.ALPHA
+    factura_salarial = demanda_laboral * p.W_BASE
 
     # -------------------------------------------------------------------------
     # 7. Demanda de Crédito
