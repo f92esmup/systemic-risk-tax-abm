@@ -1,88 +1,152 @@
-# logica/paso1.py
 import numpy as np
 from parametros import Param as p
 
-
-def paso1(precios, produccion, ventas):
+def paso1(
+    precios_prev: np.ndarray,
+    produccion_prev: np.ndarray,
+    ventas_prev: np.ndarray,
+    liquidez_prev: np.ndarray,
+    inventario_acumulado: np.ndarray,
+    mask_renacidas: np.ndarray,
+):
     """
-    Calcula la demanda esperada, precio nuevo y demanda de trabajadores.
+    Paso 1: Planificación de Empresas (Firms Planning).
 
-    Referencia: Delli Gatti et al. [69], Gualdi et al. [70], Poledna et al. [167].
-    Firms define labour and capital demand[cite: 188].
+    Calcula precio objetivo, producción deseada, demanda laboral y demanda de crédito.
+    Basado en expectativas adaptativas y reglas de ajuste (Greenwald-Stiglitz).
+    Ref: [cite: 213, 214, 215, 200]
+
+    Args:
+        precios_prev: Vector (F,) con precios del periodo anterior.
+        produccion_prev: Vector (F,) con producción del periodo anterior.
+        ventas_prev: Vector (F,) con ventas del periodo anterior.
+        liquidez_prev: Vector (F,) con liquidez disponible actual.
+        inventario_acumulado: Vector (F,) con stock de bienes no vendidos.
+        mask_renacidas: Vector booleano (F,) True si la empresa renació en este turno.
+
+    Returns:
+        Tupla con (nuevos_precios, demanda_laboral, produccion_necesaria, 
+                   demanda_credito, factura_salarial, demanda_objetivo_total)
     """
 
-    # --- 1. Definición de Estado ---
-    avg_precio = np.mean(precios)
-    precio_relativo = precios > avg_precio
+    # -------------------------------------------------------------------------
+    # 1. Cálculo de Referencias de Mercado (Vectorización tipo Matlab)
+    # -------------------------------------------------------------------------
+    # Definimos empresas sanas para el cálculo de promedios de mercado.
+    # Si una empresa acaba de renacer, no debería influir en el promedio del mercado "maduro".
+    idx_sanas = ~mask_renacidas
 
-    # Es crucial definir si hubo ventas totales o sobró stock
-    # Usamos un epsilon para float comparison, pero cuidado con el stock acumulado
-    exceso_inventario = (produccion - ventas) > 1e-5
+    if np.any(idx_sanas):
+        avg_precio_mercado = np.mean(precios_prev[idx_sanas])
+        avg_ventas_mercado = np.mean(ventas_prev[idx_sanas])
+    else:
+        # Fallback de seguridad si todas son nuevas o quebraron
+        avg_precio_mercado = np.mean(precios_prev)
+        avg_ventas_mercado = np.mean(ventas_prev) if np.mean(ventas_prev) > 0 else 1.0
 
-    # --- 2. Matriz de Sensibilidad Estocástica ---
-    # Para evitar sincronización, cada empresa tiene una reactividad ligeramente distinta
-    # en este paso de tiempo.
-    # U(-0.02, 0.02) + SENSIBILIDAD
-    ruido = np.random.uniform(0.8, 1.2, p.F)
-    ajuste_base = p.SENSIBILIDAD_AJUSTE * ruido
+    # -------------------------------------------------------------------------
+    # 2. Clasificación de Estado (Adaptive Rule) [cite: 213]
+    # -------------------------------------------------------------------------
+    # Regla: Deviation of price & Excess supply (inventory)
 
-    # Inicializamos vectores de cambio
-    cambio_precio = np.zeros(p.F)
-    cambio_cantidad = np.zeros(p.F)
+    # a) Precio relativo
+    precio_alto = precios_prev > avg_precio_mercado
 
-    # --- 3. Lógica de Ajuste (Cuadrantes Delli Gatti) ---
+    # b) Inventario excesivo (Umbral pequeño para evitar ruido numérico)
+    exceso_inventario = inventario_acumulado > 1e-4
 
-    # Caso A: Precio Alto + Stock Sobrante -> Bajar Precio, Bajar Cantidad
-    mask_A = precio_relativo & exceso_inventario
-    cambio_precio[mask_A] = -ajuste_base[mask_A]
-    cambio_cantidad[mask_A] = -ajuste_base[mask_A]
+    # -------------------------------------------------------------------------
+    # 3. Definición de Ajustes (Regla Heurística Greenwald-Stiglitz)
+    # -------------------------------------------------------------------------
+    # "Random variations in operating costs/strategy"
 
-    # Caso B: Precio Bajo + Sin Stock (Venta total) -> Subir Precio, Subir Cantidad
-    mask_B = (~precio_relativo) & (~exceso_inventario)
-    cambio_precio[mask_B] = ajuste_base[
-        mask_B
-    ]  # A veces se usa un ajuste más agresivo aquí
-    cambio_cantidad[mask_B] = ajuste_base[mask_B]
+    magnitud_ajuste = np.random.uniform(0.01, p.SENSIBILIDAD_AJUSTE, p.F)
 
-    # Caso C: Precio Bajo + Stock Sobrante -> Mantener Precio, Bajar Cantidad
-    # Si eres barato y no vendes, el problema es la demanda agregada, no tu precio.
-    mask_C = (~precio_relativo) & exceso_inventario
-    cambio_precio[mask_C] = 0.0
-    cambio_cantidad[mask_C] = -ajuste_base[mask_C]
+    delta_p = np.zeros(p.F)
+    delta_q = np.zeros(p.F)
 
-    # Caso D: Precio Alto + Sin Stock -> Mantener Precio (o subir poco), Subir Cantidad
-    mask_D = precio_relativo & (~exceso_inventario)
-    cambio_precio[mask_D] = 0.0  # O subir levemente 0.5 * ajuste
-    cambio_cantidad[mask_D] = ajuste_base[mask_D]
+    # Lógica Vectorizada de Cuadrantes:
 
-    # --- 4. Aplicación de Ajustes y Anclaje ---
+    # A: Precio Alto + Inventario -> Bajar P, Bajar Q
+    mask_A = precio_alto & exceso_inventario
+    delta_p[mask_A] = -magnitud_ajuste[mask_A]
+    delta_q[mask_A] = -magnitud_ajuste[mask_A]
 
-    nuevos_precios = precios * (1 + cambio_precio)
+    # B: Precio Bajo + Sin Inventario -> Subir P, Subir Q
+    mask_B = (~precio_alto) & (~exceso_inventario)
+    delta_p[mask_B] = magnitud_ajuste[mask_B]
+    delta_q[mask_B] = magnitud_ajuste[mask_B]
 
-    # CORRECCIÓN CRÍTICA: Base de la demanda esperada
-    # Si sobró inventario, la base para calcular el futuro son las VENTAS, no la producción.
-    # Si faltó inventario (ventas == produccion), la base es la PRODUCCIÓN.
+    # C: Precio Bajo + Inventario -> Mantener P, Bajar Q
+    mask_C = (~precio_alto) & exceso_inventario
+    delta_p[mask_C] = 0.0
+    delta_q[mask_C] = -magnitud_ajuste[mask_C]
 
-    base_demanda = np.where(exceso_inventario, ventas, produccion)
+    # D: Precio Alto + Sin Inventario -> Mantener P, Subir Q
+    mask_D = precio_alto & (~exceso_inventario)
+    delta_p[mask_D] = 0.0
+    delta_q[mask_D] = magnitud_ajuste[mask_D]
 
-    # Para evitar que una empresa con 0 ventas se quede en 0 para siempre,
-    # añadimos un "piso" de reactivación aleatoria o un mínimo base.
-    base_demanda = np.maximum(base_demanda, 0.1)
+    # -------------------------------------------------------------------------
+    # 4. Aplicación de Objetivos y Corrección "Zero Trap"
+    # -------------------------------------------------------------------------
 
-    demanda_esperada = base_demanda * (1 + cambio_cantidad)
+    # Nuevos Precios
+    nuevos_precios = precios_prev * (1 + delta_p)
+    # CORRECCIÓN: Guardrail relativo. No permitir precios absurdamente bajos comparados al mercado.
+    nuevos_precios = np.maximum(nuevos_precios, 0.5 * avg_precio_mercado)
 
-    # --- 5. Cotas de Seguridad (Guardrails) ---
-    # Evitar precios negativos o cero
-    nuevos_precios = np.maximum(nuevos_precios, 0.01)
+    # Demanda Esperada (Target Quantity)
+    # Si tengo inventario, mi demanda real fue lo que vendí.
+    # Si no tengo inventario, mi demanda fue AL MENOS lo que produje (quizás más).
+    base_demanda = np.where(exceso_inventario, ventas_prev, produccion_prev)
 
-    # Evitar explosiones o implosiones numéricas
-    demanda_esperada = np.maximum(demanda_esperada, 0.1)
+    # CORRECCIÓN CRÍTICA: Evitar que una empresa muera si base_demanda es 0.
+    base_demanda = np.maximum(base_demanda, 0.1 * avg_ventas_mercado)
 
-    # --- 6. Demanda de Factores ---
-    # Labour demand = Desired Production / Productivity [cite: 208, 214]
-    demanda_laboral = demanda_esperada / p.alpha
+    demanda_objetivo_total = base_demanda * (1 + delta_q)
+    demanda_objetivo_total = np.maximum(demanda_objetivo_total, 0.0)
 
-    # Coste estimado (Budget needed)
-    factura_esperada_salarial = demanda_laboral * p.w_base
+    # -------------------------------------------------------------------------
+    # 5. Tratamiento de Renacidas (Ref [cite: 200])
+    # -------------------------------------------------------------------------
+    # "Initial estimates for D(t+1) and P(t+1) equals respective current averages"
+    
+    if np.any(mask_renacidas):
+        nuevos_precios[mask_renacidas] = avg_precio_mercado
+        demanda_objetivo_total[mask_renacidas] = avg_ventas_mercado
 
-    return nuevos_precios, demanda_laboral, demanda_esperada, factura_esperada_salarial
+        # Virtualmente reseteamos inventario para el cálculo de producción de las renacidas
+        # (El inventario real se limpia en el paso de bancarrota, esto es solo local para el cálculo)
+        inventario_virtual = inventario_acumulado.copy()
+        inventario_virtual[mask_renacidas] = 0
+    else:
+        inventario_virtual = inventario_acumulado
+
+    # -------------------------------------------------------------------------
+    # 6. Producción Necesaria y Demanda Laboral
+    # -------------------------------------------------------------------------
+    # Producción = Demanda Esperada - Inventario actual
+    produccion_necesaria = demanda_objetivo_total - inventario_virtual
+    produccion_necesaria = np.maximum(produccion_necesaria, 0.0)
+
+    # Demanda Laboral (N) = Y / alpha [cite: 208, 214]
+    demanda_laboral = produccion_necesaria / p.alpha
+    factura_salarial = demanda_laboral * p.w_base
+
+    # -------------------------------------------------------------------------
+    # 7. Demanda de Crédito
+    # -------------------------------------------------------------------------
+    # "If wages... exceed current liquidity, it applies for a loan" [cite: 215]
+
+    deficit = factura_salarial - liquidez_prev
+    demanda_credito = np.maximum(deficit, 0.0)
+
+    return (
+        nuevos_precios,
+        demanda_laboral,
+        produccion_necesaria,
+        demanda_credito,
+        factura_salarial,
+        demanda_objetivo_total,
+    )
