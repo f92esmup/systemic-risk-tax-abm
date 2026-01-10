@@ -17,6 +17,7 @@ def paso5(
     tasas_interbancarias,  # (B,B) Tasas r_ij
     # --- Estado Hogares ---
     depositos_hogares,  # (H,) Para referencia (no se modifica aquí, se devuelve dividendo per capita)
+    tax_matrix_ib=None, # [Refactor] Matriz de impuestos (componente de tasa)
 ):
     """
     Paso 5: Contabilidad, Dividendos y Gestión de Quiebras (Cascadas).
@@ -32,6 +33,10 @@ def paso5(
     """
     F = p.F
     B = p.B
+    
+    # Manejo de default para tax_matrix (si no se usa SRT/Tobin es 0)
+    if tax_matrix_ib is None:
+        tax_matrix_ib = np.zeros((B, B))
 
     # =========================================================================
     # A. CONTABILIDAD EMPRESAS
@@ -124,8 +129,23 @@ def paso5(
     )
 
     # Intereses IB
-    intereses_ib_ganados = np.sum(pasivos_interbancarios * tasas_interbancarias, axis=0)
-    intereses_ib_pagados = np.sum(pasivos_interbancarios * tasas_interbancarias, axis=1)
+    # [Refactor] Separar Impuestos del Beneficio Bancario
+    # Total Interest = Base + Tax
+    # Lender Profits = Base Interest
+    # Gov/Fund Revenue = Tax
+    
+    total_intereses_ib_pagados = pasivos_interbancarios * tasas_interbancarias
+    
+    # Calcular Revenue Fiscal: Tax_Rate * Principal
+    revenue_fiscal_ib = pasivos_interbancarios * tax_matrix_ib
+    
+    # El prestamista gana: Total Pagado - Impuesto (i.e. Base Interest)
+    ganancia_intereses_lender_ib = total_intereses_ib_pagados - revenue_fiscal_ib
+    
+    intereses_ib_ganados = np.sum(ganancia_intereses_lender_ib, axis=0)
+    intereses_ib_pagados = np.sum(total_intereses_ib_pagados, axis=1) # El deudor paga todo
+    
+    total_revenue_fiscal = np.sum(revenue_fiscal_ib) # Fondos para el público
 
     beneficio_operativo = (
         intereses_cobrados_reales + intereses_ib_ganados - intereses_ib_pagados
@@ -136,48 +156,56 @@ def paso5(
     )
 
     # =========================================================================
-    # C. CASCADA DE QUIEBRAS BANCARIAS
+    # C. CASCADA DE QUIEBRAS BANCARIAS (Optimizado)
     # =========================================================================
     # "Iterative default-event unfolds" [cite: 236]
 
     mask_quiebra_bancos = (equity_bancos_actual < 0) | (liquidez_final_bancos < 0)
-    lista_quebrados = np.where(mask_quiebra_bancos)[0].tolist()
+
+    # Cola de procesamiento: Solo los que acaban de caer y no han sido procesados
+    cola_para_procesar = np.where(mask_quiebra_bancos)[0].tolist()
 
     # Matriz de exposición principal remanente (Principal pendiente)
     # Lo que queda por cobrar tras el pago de cuota tau
     matriz_ib_remanente = matriz_deuda_ib_total - pago_ib_requerido_matriz
+    
+    total_perdidas_contagio = 0.0
 
-    nuevos_defaults = True
-    while nuevos_defaults:
-        nuevos_defaults = False
+    while cola_para_procesar:
+        # Extraemos el lote actual de quebrados
+        bancos_fallidos_ronda = cola_para_procesar
+        cola_para_procesar = []  # Preparamos la siguiente ronda vacía
 
-        # Procesar impacto de los quebrados en sus acreedores
-        # Nota: En una cascada real, procesamos solo los NUEVOS quebrados en cada ronda.
-        # Aquí iteramos sobre todos los quebrados, pero chequeamos si el acreedor ya murió.
-
-        for b_dead in lista_quebrados:
-            # Quién le prestó a b_dead? (b_dead debe a 'acreedor')
-            # Acreedor tiene un activo en la columna 'acreedor', fila 'b_dead'
+        for b_dead in bancos_fallidos_ronda:
+            # Identificar a quién debe dinero el muerto (sus acreedores/víctimas)
+            # Acreedor tiene activo > 0 contra b_dead
+            # (Fila b_dead de matriz remanente tiene lo que b_dead LE DEBE a otros? NO)
+            
+            # CORRECCION IMPORTANTE LOGICA MATRICES:
+            # pasivos_interbancarios[i, j] -> i debe a j.
+            # matriz_ib_remanente[i, j] -> monto que i le quedó debiendo a j.
+            # SI 'i' (=b_dead) muere, 'j' (=acreedor) sufre la pérdida.
+            
+            # Buscamos columnas j donde matriz[b_dead, j] > 0
             acreedores = np.where(matriz_ib_remanente[b_dead, :] > 0)[0]
 
             for acreedor in acreedores:
                 if mask_quiebra_bancos[acreedor]:
-                    continue  # Ya está muerto, no le afecta más
+                    continue  # Ya está muerto, no importa golpearlo de nuevo
 
-                # Pérdida por contagio (Write-off total interbancario)
+                # Contagio: El acreedor pierde todo el activo
                 loss = matriz_ib_remanente[b_dead, acreedor]
-
-                # Impacto en Equity del acreedor
                 equity_bancos_actual[acreedor] -= loss
+                total_perdidas_contagio += loss
 
-                # Borrar la deuda para no contabilizarla dos veces
+                # Quemamos el enlace para no procesarlo nunca más
                 matriz_ib_remanente[b_dead, acreedor] = 0.0
 
-                # Chequear solvencia tras el golpe
+                # Chequeo de insolvencia inducida
                 if equity_bancos_actual[acreedor] < 0:
                     mask_quiebra_bancos[acreedor] = True
-                    lista_quebrados.append(acreedor)
-                    nuevos_defaults = True
+                    # Añadimos a la cola para que SU caída propague en la sig. ronda
+                    cola_para_procesar.append(acreedor)
 
     # =========================================================================
     # D. DIVIDENDOS Y RENACIMIENTO
@@ -248,4 +276,7 @@ def paso5(
         mask_quiebra_bancos,  # Importante para estadísticas de riesgo sistémico
         pasivos_interbancarios,  # Matriz saneada
         dividendos_per_capita,  # Importante para Paso 4
+        # Nuevas métricas para plots
+        np.sum(mask_quiebra_bancos), # Total quiebras bancos
+        total_perdidas_contagio # Total dinero perdido por contagio
     )

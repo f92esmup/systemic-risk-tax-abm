@@ -49,7 +49,7 @@ def paso4(
     # [cite_start]"Households compare prices from z randomly chosen firms and buy the cheapest" [cite: 211]
 
     # Cada hogar ve 'z' empresas aleatorias
-    indices_firmas_vistas = np.random.randint(0, F, size=(H, p.Z_CONSUMO))
+    indices_firmas_vistas = np.random.randint(0, F, size=(H, p.Z_CONSUMO), dtype=np.int64)
 
     # Extraer precios correspondientes
     precios_vistas = precios_actuales[indices_firmas_vistas]
@@ -93,25 +93,39 @@ def paso4(
     # -------------------------------------------------------------------------
     # 6. Actualización de Hogares (Racionamiento Agregado)
     # -------------------------------------------------------------------------
-    # Dinero que realmente salió del bolsillo de los consumidores
-    gasto_total_real = np.sum(ingresos_ventas)
-    demanda_total_planeada = np.sum(presupuesto_consumo)
-
-    # Si hubo stockouts, gasto_real < demanda_planeada.
-    # Calculamos factor de ajuste global (Mean Field Approximation)
-    if demanda_total_planeada > 1e-6:
-        ratio_satisfaccion = gasto_total_real / demanda_total_planeada
-    else:
-        ratio_satisfaccion = 1.0
-
+    # -------------------------------------------------------------------------
+    # 6. Actualización de Hogares (Racionamiento Específico)
+    # -------------------------------------------------------------------------
+    # [Refactor] Ahora el racionamiento es local: Si tu tienda no tiene, no gastas.
+    
+    # Ratio de satisfacción por empresa (0.0 a 1.0)
+    # ratio_j = Ventas_j / Demanda_j
+    
+    # Manejo seguro de division por cero (si demanda es 0, ratio es 1.0 logicamente)
+    ratio_satisfaccion_firma = np.divide(
+        ventas_cantidad_real,
+        demanda_cantidad_teorica,
+        out=np.ones_like(ventas_cantidad_real), # Default 1.0
+        where=demanda_cantidad_teorica > 1e-9
+    )
+    
+    # Mapear el ratio de la empresa elegida a cada hogar
+    # Hago lookup usando el índice de la firma
+    ratio_satisfaccion_hogar = ratio_satisfaccion_firma[firmas_elegidas]
+    
     # Gasto efectivo por hogar
-    gasto_efectivo_hogar = presupuesto_consumo * ratio_satisfaccion
+    gasto_efectivo_hogar = presupuesto_consumo * ratio_satisfaccion_hogar
 
     # Nueva riqueza = Riqueza inicial - Gasto
     depositos_finales = riqueza_hogares - gasto_efectivo_hogar
 
     # Nota de consistencia: sum(depositos_finales) + sum(ingresos_ventas)
     # debería ser igual a sum(riqueza_hogares) [SFC Check]
+    # Check de consistencia Stock-Flow (SFC)
+    # El dinero que tenían los hogares (riqueza) debe estar ahora en depositos_finales o en ingresos_ventas
+    assert np.isclose(
+        np.sum(depositos_finales) + np.sum(ingresos_ventas), np.sum(riqueza_hogares)
+    ), "Error SFC: El dinero se ha creado o destruido en el intercambio."
 
     return (
         ventas_cantidad_real,  # Q vendida

@@ -3,7 +3,7 @@ from parametros import Param as p
 
 
 def paso3(
-    demanda_laboral_objetivo,  # Vector (F,) N_target calculado en Paso 1
+    demanda_laboral_necesaria,  # Vector (F,) N_required calculado en Paso 1 (UNITS: Workers)
     liquidez_previa,  # Vector (F,) Liquidez que tenía la empresa al inicio
     nuevos_prestamos,  # Vector (F,) Lo que consiguió prestado en Paso 2
     inventario_acumulado,  # Vector (F,) Stock remanente
@@ -15,7 +15,7 @@ def paso3(
     2. Producen bienes físicos.
     3. Pagan salarios (transferencia de liquidez a hogares).
 
-    Ref: [cite: 190, 208, 218]
+    Ref: [cite: 190-218]
     """
 
     # -------------------------------------------------------------------------
@@ -23,6 +23,13 @@ def paso3(
     # -------------------------------------------------------------------------
     # El dinero disponible para pagar nóminas es la caja inicial + deuda nueva.
     presupuesto_disponible = liquidez_previa + nuevos_prestamos
+    
+    # Assert de seguridad lógica: Liquidez no debería ser negativa al entrar a producción
+    # Si ocurrió, indica error en lógica de quiebra del paso anterior
+    if np.any(presupuesto_disponible < 0):
+        # En producción real esto podría ser un warning en lugar de crash
+        presupuesto_disponible = np.maximum(presupuesto_disponible, 0.0)
+
 
     # -------------------------------------------------------------------------
     # 2. Determinar Empleo Real (Re-evaluación)
@@ -34,7 +41,7 @@ def paso3(
     # Si conseguí el crédito, contrato lo que quería (demanda_objetivo).
     # Si no, contrato solo lo que puedo pagar.
     #  "firms re-evaluate the required workforce"
-    empleo_real = np.minimum(demanda_laboral_objetivo, max_trabajadores_pagables)
+    empleo_real = np.minimum(demanda_laboral_necesaria, max_trabajadores_pagables)
 
     # -------------------------------------------------------------------------
     # 3. Producción Física

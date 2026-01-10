@@ -1,250 +1,321 @@
-# main.py
+
 import numpy as np
+import time
+import os
 import matplotlib.pyplot as plt
 from parametros import Param as p
 
-# Importar los pasos lógicos
+# Importación de Módulos Lógicos
 from logica.paso1 import paso1
-from logica.paso2 import paso2
+from logica.paso2 import paso2, calcular_debtrank_vector
 from logica.paso3 import paso3
 from logica.paso4 import paso4
 from logica.paso5_6_7 import paso5
 
+# =============================================================================
+# CONFIGURACIÓN VISUAL Y SALIDA
+# =============================================================================
+plt.style.use('ggplot')
+PARAMS = {
+    'axes.labelsize': 12,
+    'legend.fontsize': 10,
+    'xtick.labelsize': 10,
+    'ytick.labelsize': 10,
+    'text.usetex': False,
+    'figure.figsize': (10, 6)
+}
+plt.rcParams.update(PARAMS)
 
-def ejecutar_simulacion(modo_impuesto="NINGUNO"):
+OUTPUT_DIR = "output_plots"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+SIMULATIONS_PER_MODE = 20  # Cantidad de simulaciones para suavizado estadístico
+
+# =============================================================================
+# MOTOR DE SIMULACIÓN
+# =============================================================================
+def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None):
     """
     Ejecuta una simulación completa del modelo CRISIS.
-
-    Args:
-        modo_impuesto (str): "NINGUNO", "TOBIN", "SRT"
-
-    Returns:
-        dict: Diccionario con históricos de datos para análisis.
     """
-    print(f"--- Iniciando Simulación: Modo {modo_impuesto} ---")
+    if semilla is not None:
+        np.random.seed(semilla)
+        
+    start_time = time.time()
+    # print(f"--- Iniciando Simulación: {modo_impuesto} ---")
 
-    # =========================================================================
     # 1. INICIALIZACIÓN
-    # =========================================================================
-    np.random.seed(42)  # Reproducibilidad
+    F, B, H = p.F, p.B, p.H
+    
+    precios = np.full(F, p.PRECIO_INICIAL)
+    produccion = np.full(F, p.PRODUCCION_INICIAL)
+    ventas = produccion.copy()
+    inventario = np.zeros(F)
+    
+    equity_empresas = np.full(F, p.EQUITY_INICIAL_FIRMAS)
+    liquidez_empresas = np.full(F, p.LIQUIDEZ_INICIAL_FIRMAS)
+    deuda_empresas = np.zeros(F)
+    
+    banco_acreedor_empresa = np.random.randint(0, B, size=F)
+    tasa_empresas = np.full(F, p.R_BAR)
 
-    # --- Empresas (F) ---
-    precios = np.random.uniform(p.PRECIO_INICIAL * 0.9, p.PRECIO_INICIAL * 1.1, p.F)
-    produccion = np.random.uniform(
-        p.PRODUCCION_INICIAL * 0.9, p.PRODUCCION_INICIAL * 1.1, p.F
-    )
-    ventas = produccion.copy()  # Asumimos equilibrio inicial
+    equity_bancos = np.full(B, p.EQUITY_INICIAL_BANCOS)
+    liquidez_bancos = np.full(B, p.LIQUIDEZ_INICIAL_BANCOS)
+    
+    pasivos_interbancarios = np.zeros((B, B))
+    tasas_interbancarias = np.zeros((B, B)) 
 
-    liquidez_empresas = np.full(p.F, p.LIQUIDEZ_INICIAL_FIRMAS)
-    equity_empresas = np.full(p.F, p.EQUITY_INICIAL_FIRMAS)
-    deuda_empresas = np.zeros(p.F)  # Empiezan sin deuda para calentar motores
-    tasa_empresas = np.full(p.F, p.R_BAR)
-    inventario = np.zeros(p.F)
+    depositos_hogares = np.full(H, p.DEPOSITOS_INICIALES_HOGARES)
+    dividendos_previos = np.zeros(H)
+    mask_renacidas = np.zeros(F, dtype=bool)
 
-    # Asignación inicial de banco acreedor (aleatorio)
-    banco_acreedor = np.random.randint(0, p.B, p.F)
-
-    mask_renacidas = np.zeros(p.F, dtype=bool)  # Nadie acaba de quebrar en t=0
-
-    # --- Bancos (B) ---
-    liquidez_bancos = np.full(p.B, p.LIQUIDEZ_INICIAL_BANCOS)
-    equity_bancos = np.full(p.B, p.EQUITY_INICIAL_BANCOS)
-
-    # Matriz de Pasivos Interbancarios (B x B)
-    # Inicialmente vacía o aleatoria muy escasa
-    pasivos_interbancarios = np.zeros((p.B, p.B))
-    tasas_interbancarias = np.full((p.B, p.B), p.R_BAR)
-
-    # --- Hogares (H) ---
-    depositos_hogares = np.full(p.H, p.DEPOSITOS_INICIALES_HOGARES)
-    dividendos_per_capita = 0.0
-
-    # --- Historial de Datos ---
+    # Historia
     historia = {
-        "PIB": [],  # Producción total real
-        "Quiebras_F": [],  # Cantidad de empresas quebradas
-        "Quiebras_B": [],  # Cantidad de bancos quebrados
-        "Total_Deuda": [],  # Deuda total empresas
-        "Volumen_IB": [],  # Volumen préstamos interbancarios
+        "t": [],
+        "DebtRank_Promedio": [],
+        "Total_Equity_Bancos": [],
+        "Total_Deuda_Interbancaria": [],
+        "Eventos_Cascada_Size": [],
+        "Eventos_Perdida_Total": [],
+        "Snapshots": {},
+        "SRT_Scatter": {}
     }
 
-    # =========================================================================
-    # 2. BUCLE TEMPORAL (Time Loop)
-    # =========================================================================
+    # 2. BUCLE
     for t in range(p.T):
-        if t % 50 == 0:
-            print(f"Paso {t}/{p.T}...")
-
-        # ---------------------------------------------------------------------
-        # Paso 1: Planificación (Precios y Producción Deseada)
-        # ---------------------------------------------------------------------
-        (
-            nuevos_precios,
-            demanda_laboral,
-            produccion_necesaria,
-            demanda_credito,
-            factura_salarial,
-            demanda_objetivo,
-        ) = paso1(
-            precios_prev=precios,
-            produccion_prev=produccion,
-            ventas_prev=ventas,
-            liquidez_prev=liquidez_empresas,
-            inventario_acumulado=inventario,
-            mask_renacidas=mask_renacidas,
+        # Paso 1: Planificación
+        (nuevos_precios, demanda_laboral, produccion_necesaria, 
+         demanda_credito, factura_salarial, demanda_obj) = paso1(
+            precios, produccion, ventas, liquidez_empresas, 
+            inventario, mask_renacidas
         )
-
-        # Actualizamos precios para el periodo
         precios = nuevos_precios
 
-        # ---------------------------------------------------------------------
-        # Paso 2: Mercado de Crédito (Bancos y SRT)
-        # ---------------------------------------------------------------------
-        (
-            nuevos_prestamos,
-            tasas_elegidas,
-            pasivos_interbancarios,
-            liquidez_bancos,
-            bancos_elegidos,
-        ) = paso2(
-            demanda_credito=demanda_credito,
-            liquidez_bancos=liquidez_bancos,
-            equity_bancos=equity_bancos,
-            pasivos_interbancarios=pasivos_interbancarios,
-            equity_empresas=equity_empresas,
-            deuda_empresas=deuda_empresas,
-            modo_impuesto=modo_impuesto,
+        # Paso 2: Crédito
+        (nuevos_prestamos, tasas_finales, nueva_matriz_ib, 
+         liquidez_bancos_post, bancos_elegidos, matriz_impuestos, debug_data) = paso2(
+            demanda_credito, liquidez_bancos, equity_bancos,
+            pasivos_interbancarios, equity_empresas, deuda_empresas,
+            modo_impuesto=modo_impuesto
         )
+        
+        # Guardar datos scatter SRT
+        if "delta_el" in debug_data and t % 50 == 0:
+            historia["SRT_Scatter"][f"t_{t}"] = {
+                "Delta_EL": debug_data["delta_el"].copy(),
+                "Pasivos_IB": pasivos_interbancarios.copy()
+            }
 
-        # Actualizamos quién es el banco de cada empresa y su nueva tasa
-        # Nota: Simplificación -> Si la empresa ya tenía deuda con banco X y pide más a Y,
-        # idealmente se modelan múltiples préstamos. Aquí consolidamos al nuevo banco
-        # o mantenemos el viejo si no hubo préstamo nuevo.
-        mask_hubo_prestamo = nuevos_prestamos > 0
-        banco_acreedor[mask_hubo_prestamo] = bancos_elegidos[mask_hubo_prestamo]
-        tasa_empresas[mask_hubo_prestamo] = tasas_elegidas[mask_hubo_prestamo]
-
-        # Acumulamos deuda nueva
+        # Actualizar estado financiero intermedio
         deuda_empresas += nuevos_prestamos
+        tasa_empresas = tasas_finales
+        banco_acreedor_empresa = bancos_elegidos
+        pasivos_interbancarios = nueva_matriz_ib
+        liquidez_bancos = liquidez_bancos_post
+        
+        # Calcular DebtRank (Riesgo Sistémico)
+        total_lending = np.sum(pasivos_interbancarios, axis=0)
+        V_total = np.sum(total_lending)
+        if V_total > 1e-6:
+            v_sys = total_lending / V_total
+            dr_vector = calcular_debtrank_vector(pasivos_interbancarios, equity_bancos, v_sys)
+            avg_dr = np.mean(dr_vector)
+        else:
+            dr_vector = np.zeros(B)
+            avg_dr = 0.0
 
-        # ---------------------------------------------------------------------
-        # Paso 3: Producción Real (Labour Market)
-        # ---------------------------------------------------------------------
-        (
-            produccion_real,
-            oferta_total_bienes,
-            empleo_real,
-            factura_salarial_real,
-            liquidez_empresas,
-        ) = paso3(
-            demanda_laboral_objetivo=demanda_laboral,
-            liquidez_previa=liquidez_empresas,
-            nuevos_prestamos=nuevos_prestamos,
-            inventario_acumulado=inventario,
+        # Paso 3: Producción
+        (produccion_real, oferta_bienes, empleo_real, 
+         factura_pagada, liquidez_empresas_post) = paso3(
+            demanda_laboral, liquidez_empresas, nuevos_prestamos, inventario
         )
-
-        # Actualizamos la producción actual (Y)
         produccion = produccion_real
-
-        # ---------------------------------------------------------------------
-        # Paso 4: Consumo (Goods Market)
-        # ---------------------------------------------------------------------
-        (
-            ventas_cantidad_real,
-            ingresos_ventas,
-            inventario_final,
-            depositos_hogares,
-            demanda_teorica,
-            ingreso_salarial_per_capita,
-        ) = paso4(
-            precios_actuales=precios,
-            oferta_total_bienes=oferta_total_bienes,
-            factura_salarial_real=factura_salarial_real,
-            depositos_hogares=depositos_hogares,
-            dividendos_previos=dividendos_per_capita,
+        liquidez_empresas = liquidez_empresas_post
+        
+        # Paso 4: Consumo
+        (ventas_real, ingresos_ventas, inventario_final, 
+         depositos_post, demanda_teorica, _) = paso4(
+            precios, oferta_bienes, factura_pagada, depositos_hogares,
+            dividendos_previos
         )
-
-        # Actualizamos inventarios y ventas para el siguiente t
+        ventas = ventas_real
         inventario = inventario_final
-        ventas = ventas_cantidad_real
-
-        # ---------------------------------------------------------------------
-        # Paso 5: Contabilidad y Quiebras
-        # ---------------------------------------------------------------------
-        (
-            liquidez_empresas,
-            equity_empresas,
-            deuda_empresas,
-            mask_quiebra_F,
-            liquidez_bancos,
-            equity_bancos,
-            mask_quiebra_B,
-            pasivos_interbancarios,
-            dividendos_per_capita,
-        ) = paso5(
-            liquidez_empresas=liquidez_empresas,
-            ingresos_ventas=ingresos_ventas,
-            deuda_empresas=deuda_empresas,
-            tasa_empresas=tasa_empresas,
-            equity_empresas=equity_empresas,
-            banco_acreedor_empresa=banco_acreedor,
-            liquidez_bancos=liquidez_bancos,
-            equity_bancos=equity_bancos,
-            pasivos_interbancarios=pasivos_interbancarios,
-            tasas_interbancarias=tasas_interbancarias,
-            depositos_hogares=depositos_hogares,
+        depositos_hogares = depositos_post
+        
+        # Paso 5: Contabilidad
+        (liquidez_empresas_end, equity_empresas_end, deuda_empresas_end, 
+         mask_quiebra_F, liquidez_bancos_end, equity_bancos_end, 
+         mask_quiebra_B, pasivos_ib_end, dividendos_pc, 
+         total_quiebras_B, total_losses_contagion) = paso5(
+            liquidez_empresas, ingresos_ventas, deuda_empresas, tasa_empresas,
+            equity_empresas, banco_acreedor_empresa,
+            liquidez_bancos, equity_bancos, pasivos_interbancarios, tasas_interbancarias,
+            depositos_hogares,
+            tax_matrix_ib=matriz_impuestos
         )
-
-        # Guardar estado 'renacidas' para el próximo paso 1
+        
+        # Actualización final
+        liquidez_empresas = liquidez_empresas_end
+        equity_empresas = equity_empresas_end
+        deuda_empresas = deuda_empresas_end
+        liquidez_bancos = liquidez_bancos_end
+        equity_bancos = equity_bancos_end
+        pasivos_interbancarios = pasivos_ib_end
+        dividendos_previos = np.full(H, dividendos_pc)
         mask_renacidas = mask_quiebra_F
 
-        # ---------------------------------------------------------------------
-        # Recolección de Datos
-        # ---------------------------------------------------------------------
-        historia["PIB"].append(np.sum(produccion_real))
-        historia["Quiebras_F"].append(np.sum(mask_quiebra_F))
-        historia["Quiebras_B"].append(np.sum(mask_quiebra_B))
-        historia["Total_Deuda"].append(np.sum(deuda_empresas))
-        historia["Volumen_IB"].append(np.sum(pasivos_interbancarios))
+        # Registro
+        historia["t"].append(t)
+        historia["DebtRank_Promedio"].append(avg_dr)
+        historia["Total_Deuda_Interbancaria"].append(V_total)
+        historia["Total_Equity_Bancos"].append(np.sum(equity_bancos))
+        
+        if total_quiebras_B > 0:
+            historia["Eventos_Cascada_Size"].append(int(total_quiebras_B))
+            historia["Eventos_Perdida_Total"].append(total_losses_contagion)
+            
+        if t == 100 or t == (p.T - 1):
+            historia["Snapshots"][f"t_{t}"] = {
+                "DebtRank": dr_vector.copy(),
+                "Equity_Bancos": equity_bancos.copy()
+            }
 
+    # print(f"Simulacion finalizada ({mode_label}) en {time.time()-start_time:.2f}s")
     return historia
 
-
 # =============================================================================
-# EJECUCIÓN DEL SCRIPT
+# EXPERIMENTO Y PLOTTING
 # =============================================================================
-if __name__ == "__main__":
-    # 1. Correr escenario Base (Sin Impuesto)
-    datos_base = ejecutar_simulacion("NINGUNO")
+def run_experiment():
+    modes = ["NINGUNO", "TOBIN", "SRT"]
+    colors = {"NINGUNO": "red", "TOBIN": "blue", "SRT": "green"}
+    
+    results = {m: {
+        "debtrank_profiles": [],
+        "scatter_data": [],
+        "total_losses": [],
+        "cascade_sizes": [],
+        "volumes": []
+    } for m in modes}
 
-    # 2. Correr escenario SRT (Systemic Risk Tax)
-    datos_srt = ejecutar_simulacion("SRT")
+    print(f"--- Iniciando Experimento Comparativo ({SIMULATIONS_PER_MODE} runs/modo) ---")
+    
+    for mode in modes:
+        print(f"Modo: {mode} ", end="")
+        for i in range(SIMULATIONS_PER_MODE):
+            h = ejecutar_simulacion(modo_impuesto=mode, semilla=42+i)
+            
+            # Recolectar datos
+            # Fig 3b
+            if "t_499" in h["Snapshots"]:
+                results[mode]["debtrank_profiles"].append(h["Snapshots"]["t_499"]["DebtRank"])
+            
+            # Fig 3d
+            for k, data in h["SRT_Scatter"].items():
+                l = data["Pasivos_IB"].flatten()
+                d = data["Delta_EL"].flatten()
+                mask = (l > 1e-6) & (d > 1e-9)
+                if np.any(mask):
+                    results[mode]["scatter_data"].append((l[mask], d[mask]))
+            
+            # Fig 4
+            results[mode]["total_losses"].append(np.sum(h["Eventos_Perdida_Total"]))
+            
+            cascades = h["Eventos_Cascada_Size"]
+            if cascades:
+                results[mode]["cascade_sizes"].extend(cascades)
+            else:
+                results[mode]["cascade_sizes"].append(0)
+            
+            results[mode]["volumes"].append(np.mean(h["Total_Deuda_Interbancaria"]))
+            
+            if i % 5 == 0: print(".", end="", flush=True)
+        print(" OK")
 
-    # 3. Graficar Resultados Comparativos
-    fig, ax = plt.subplots(2, 2, figsize=(12, 10))
+    return results, colors
 
-    # PIB
-    ax[0, 0].plot(datos_base["PIB"], label="Sin Impuesto", color="red", alpha=0.7)
-    ax[0, 0].plot(datos_srt["PIB"], label="SRT", color="green", alpha=0.7)
-    ax[0, 0].set_title("Producción Total (PIB)")
-    ax[0, 0].legend()
-
-    # Quiebras Bancarias (Cascadas)
-    ax[0, 1].plot(datos_base["Quiebras_B"], label="Sin Impuesto", color="red")
-    ax[0, 1].plot(datos_srt["Quiebras_B"], label="SRT", color="green")
-    ax[0, 1].set_title("Quiebras Bancarias")
-
-    # Deuda Total
-    ax[1, 0].plot(datos_base["Total_Deuda"], label="Sin Impuesto", color="red")
-    ax[1, 0].plot(datos_srt["Total_Deuda"], label="SRT", color="green")
-    ax[1, 0].set_title("Deuda Corporativa Total")
-
-    # Volumen Interbancario
-    ax[1, 1].plot(datos_base["Volumen_IB"], label="Sin Impuesto", color="red")
-    ax[1, 1].plot(datos_srt["Volumen_IB"], label="SRT", color="green")
-    ax[1, 1].set_title("Volumen Mercado Interbancario")
-
+def plot_fig_3b(results, colors):
+    plt.figure()
+    B = p.B
+    x = np.arange(1, B + 1)
+    bar_width = 0.25
+    offsets = {"NINGUNO": -bar_width, "TOBIN": 0, "SRT": bar_width}
+    
+    for mode in results:
+        data = results[mode]["debtrank_profiles"]
+        if not data: continue
+        sorted_runs = np.sort(np.array(data), axis=1)[:, ::-1]
+        avg_profile = np.mean(sorted_runs, axis=0)
+        std_profile = np.std(sorted_runs, axis=0)
+        
+        plt.bar(x + offsets[mode], avg_profile, width=bar_width, 
+                color=colors[mode], label=mode, alpha=0.8, yerr=std_profile, capsize=2)
+        
+    plt.xlabel('Bank Rank (by DebtRank)')
+    plt.ylabel('DebtRank $R_i$')
+    plt.title('Fig 3b: Perfil de Riesgo Sistémico')
+    plt.legend()
     plt.tight_layout()
-    plt.show()
+    plt.savefig(f"{OUTPUT_DIR}/Fig_3b_DebtRank.png")
+    plt.close()
 
-    print("Simulación finalizada.")
+def plot_fig_3d(results, colors):
+    plt.figure()
+    for mode in results:
+        if not results[mode]["scatter_data"]: continue
+        
+        all_l, all_d = [], []
+        for l, d in results[mode]["scatter_data"]:
+            all_l.extend(l)
+            all_d.extend(d)
+        
+        plt.scatter(all_l, all_d, color=colors[mode], alpha=0.3, label=mode, s=10, edgecolors='none')
+        
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.xlabel('Loan Size (Log)')
+    plt.ylabel(r'$\Delta EL^{syst}$ (Log)')
+    plt.title('Fig 3d: Contribución Marginal al Riesgo')
+    plt.legend()
+    plt.grid(True, which="both", ls="-", alpha=0.2)
+    plt.tight_layout()
+    plt.savefig(f"{OUTPUT_DIR}/Fig_3d_Scatter.png")
+    plt.close()
+
+def plot_fig_4(results, colors):
+    # 4a Losses
+    plt.figure()
+    for mode in results:
+        plt.hist(results[mode]["total_losses"], bins=15, color=colors[mode], alpha=0.5, label=mode, density=True)
+    plt.title('Fig 4a: Pérdidas Totales')
+    plt.legend()
+    plt.savefig(f"{OUTPUT_DIR}/Fig_4a_Losses.png")
+    plt.close()
+
+    # 4b Cascades
+    plt.figure()
+    bins = np.arange(0, p.B + 2) - 0.5
+    for mode in results:
+        plt.hist(results[mode]["cascade_sizes"], bins=bins, color=colors[mode], alpha=0.5, label=mode, density=True, histtype='stepfilled')
+    plt.title('Fig 4b: Tamaño de Cascadas')
+    plt.legend()
+    plt.savefig(f"{OUTPUT_DIR}/Fig_4b_Cascades.png")
+    plt.close()
+
+    # 4c Volume
+    plt.figure()
+    for mode in results:
+        plt.hist(results[mode]["volumes"], bins=15, color=colors[mode], alpha=0.5, label=mode, density=True)
+    plt.title('Fig 4c: Volumen Interbancario')
+    plt.legend()
+    plt.savefig(f"{OUTPUT_DIR}/Fig_4c_Volume.png")
+    plt.close()
+
+if __name__ == "__main__":
+    print("=== Systemic Risk Tax ABM: Orchestrator ===")
+    data, colors = run_experiment()
+    print("Generando Gráficos...")
+    plot_fig_3b(data, colors)
+    plot_fig_3d(data, colors)
+    plot_fig_4(data, colors)
+    print(f"Listo. Resultados en ./{OUTPUT_DIR}")

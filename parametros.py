@@ -29,10 +29,22 @@ class Param:
     N_BANCOS_CONTACTADOS = 5  # 'n' Number of applications in credit market [cite: 736]
     Z_CONSUMO = 2  # 'z' Number of applications in consumption goods market [cite: 733]
 
+    # --- Parámetros del Mercado de Crédito (Paso 2) ---
+    FACTOR_PROB_DEFAULT = 0.01  # Escalar para proxy de riesgo (Eq. A4)
+    RANGO_PSI = 0.1             # Variabilidad idiosincrática interbancaria (0 a 0.1)
+    DELTA_LOAN_TEST = 1.0       # Monto del préstamo hipotético para cálculo SRT
+
+
+
     # --- Parámetros de Ajuste Adaptativo (Paso 1) ---
     # Rango de ajuste aleatorio para precios y cantidades (Greenwald-Stiglitz)
     RANGO_AJUSTE_MIN = 0.01
     RANGO_AJUSTE_MAX = 0.05
+    
+    # Parámetros de Estabilidad Numérica (Paso 1)
+    UMBRAL_INVENTARIO = 1e-4        # Nivel mínimo para considerar exceso de stock
+    SUELO_PRECIO_RELATIVO = 0.5     # Precio mínimo como fracción del promedio
+    SUELO_DEMANDA_RELATIVO = 0.1    # Demanda mínima como fracción del promedio
 
     # --- Parámetros de Impuestos (Policy) ---
     ZETA = 0.02  # Sensibilidad del impuesto SRT (o 1.0 para full pricing) [cite: 259]
@@ -45,5 +57,6 @@ class Param:
     LIQUIDEZ_INICIAL_FIRMAS = 50.0
 
     EQUITY_INICIAL_BANCOS = 200.0
-    LIQUIDEZ_INICIAL_BANCOS = 1000.0
+    EQUITY_INICIAL_BANCOS = 200.0
+    LIQUIDEZ_INICIAL_BANCOS = 200.0 # [Tuning] Reducido para forzar mercado interbancario (Demand ~5000 > Supply 4000)
     DEPOSITOS_INICIALES_HOGARES = 10.0

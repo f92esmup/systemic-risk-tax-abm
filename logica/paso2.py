@@ -51,7 +51,10 @@ def paso2(
 
     # Factores idiosincráticos (Aleatoriedad operativa) [cite: 628, 647]
     chi = np.random.uniform(0, 1, B)  # Especificidad banco (Mercado Empresas)
-    psi = np.random.uniform(0, 0.1, B)  # Especificidad banco (Mercado Interbancario)
+    
+    # Especificidad banco (Mercado Interbancario)
+    # Refactorizado de hardcode 0.1 a parametro RANGO_PSI
+    psi = np.random.uniform(0, p.RANGO_PSI, B)  
 
     # -------------------------------------------------------------------------
     # 2. Ofertas Mercado Interbancario (Cálculo Matricial)
@@ -65,23 +68,26 @@ def paso2(
 
     # --- CÁLCULO DE IMPUESTOS ---
     tax_matrix = np.zeros((B, B))
+    metadata_debug = {}
 
     if modo_impuesto == "TOBIN":
         # Tasa plana sobre la transacción (aprox como spread) [cite: 250, 673]
-        # El paper suma una constante a la tasa: r_total = r + 0.002
-        tax_matrix[:, :] = 0.002
+        # Refactorizado hardcode 0.002 -> p.TASA_TOBIN (Eq. A6)
+        tax_matrix[:, :] = p.TASA_TOBIN
 
     elif modo_impuesto == "SRT":
         # Calcular contribución marginal al riesgo sistémico para cada par posible
         # Usamos el leverage como proxy de probabilidad de default p_i [cite: 663]
-        probs_default = 0.01 * mu_bancos  # Proxy definido en Eq A4
+        # Refactorizado hardcode 0.01 -> p.FACTOR_PROB_DEFAULT 
+        probs_default = p.FACTOR_PROB_DEFAULT * mu_bancos  # Proxy definido en Eq A4
 
-        tax_matrix = calcular_matriz_srt(
+        tax_matrix, delta_el_matrix = calcular_matriz_srt(
             pasivos_interbancarios,
             equity_bancos,
             probs_default,
             p.ZETA,  # Sensibilidad del impuesto (ej. 0.02 o 1.0)
         )
+        metadata_debug["delta_el"] = delta_el_matrix
 
     # Tasas Interbancarias Totales [cite: 670]
     r_ib_total = r_ib_base + tax_matrix
@@ -152,31 +158,36 @@ def paso2(
 
     # Aleatorizar orden de ejecución para no favorecer a index 0
     orden = np.random.permutation(F)
+    
+    # Tolerancia numérica para float comparisons
+    EPSILON = 1e-9
 
     for f in orden:
         monto = monto_solicitado[f]
+        # Optimization: Skip negligible loan requests
         if monto <= 1e-6:
             continue
 
         b = bancos_elegidos[f]
 
         # Caso 1: Tiene liquidez propia
-        if liquidez_actual[b] >= monto:
+        # Usamos EPSILON para robustez numérica
+        if liquidez_actual[b] >= (monto - EPSILON):
             liquidez_actual[b] -= monto
             nuevos_prestamos[f] = monto
 
         # Caso 2: Necesita interbancario
         else:
-            propio = liquidez_actual[b]
+            propio = np.maximum(liquidez_actual[b], 0.0)
             faltante = monto - propio
 
             lender = mejores_lenders_idx[b]
 
             # Verificar si el prestamista interbancario tiene fondos
-            if liquidez_actual[lender] >= faltante:
+            if liquidez_actual[lender] >= (faltante - EPSILON):
                 # Transacción exitosa
                 liquidez_actual[lender] -= faltante
-                liquidez_actual[b] = 0  # Usa todo lo propio
+                liquidez_actual[b] = 0.0  # Usa todo lo propio
 
                 # Actualizar Red de Pasivos: Banco b ahora debe a Lender
                 nueva_matriz_ib[b, lender] += faltante
@@ -192,6 +203,8 @@ def paso2(
         nueva_matriz_ib,
         liquidez_actual,
         bancos_elegidos,
+        tax_matrix, # [Refactor] Exportamos matrix impositiva para contabilidad
+        metadata_debug,
     )
 
 
@@ -203,12 +216,18 @@ def paso2(
 def calcular_matriz_srt(L, equity, probs_default, zeta):
     """
     Calcula el Impuesto SRT para cada link potencial.
+    
     SRT_ij = Zeta * max(0, EL_syst(+loan) - EL_syst(base))
+    
+    Implementa Ecuación 5 del paper [cite: Eq. 5] y cálculo de Marginal Systemic Risk Contribution.
+    
+    Complejidad: O(B^3) debido a DebtRank anidado.
 
     Ref: [cite: 136-138, 151-153]
     """
     B = L.shape[0]
     tax_matrix = np.zeros((B, B))
+    delta_el_matrix = np.zeros((B, B))
 
     # 1. Calcular DebtRank Base (R_i) y Valor Económico (v_i)
     # Valor Económico v_i = Activos Interbancarios prestados / Total Sistema
@@ -216,19 +235,21 @@ def calcular_matriz_srt(L, equity, probs_default, zeta):
     total_lending = np.sum(L, axis=0)  # Sumar col (lo que i ha prestado a otros)
     V_total = np.sum(total_lending)
 
+    # Optimization: Early exit if no interbank liabilities exist
     if V_total == 0:
-        return tax_matrix  # Si no hay red, no hay riesgo sistémico
+        return tax_matrix, delta_el_matrix  # Si no hay red, no hay riesgo sistémico
 
     v = total_lending / V_total
 
     # Pérdida Sistémica Esperada Base (EL_base)
     # EL = sum(p_i * V_total * R_i) [cite: 111, 138]
+    # Ecuación 3 del paper (implícita)
     R_base = calcular_debtrank_vector(L, equity, v)
     EL_base = np.sum(probs_default * V_total * R_base)
 
     # 2. Cálculo Marginal (Perturbación)
     # Simulamos añadir un préstamo unitario para ver el gradiente del riesgo
-    delta_loan = 1.0
+    delta_loan = p.DELTA_LOAN_TEST
 
     # Nota: Bucle O(B^2) llamando a DebtRank O(B). Complejidad O(B^3).
     # Para B=20 es muy rápido.
@@ -251,16 +272,18 @@ def calcular_matriz_srt(L, equity, probs_default, zeta):
 
             # Contribución Marginal [cite: 137]
             delta_EL = EL_hypo - EL_base
+            delta_el_matrix[borrower, lender] = delta_EL
 
             # SRT (Tasa)
             if delta_EL > 0:
                 # El paper define SRT como valor monetario.
                 # Para pasarlo a tasa de interés, dividimos por el monto del préstamo.
+                # Tax Rate = (Zeta * Delta_EL) / Loan_Amount
                 tax_value = zeta * delta_EL
                 tax_rate = tax_value / delta_loan
                 tax_matrix[borrower, lender] = tax_rate
 
-    return tax_matrix
+    return tax_matrix, delta_el_matrix
 
 
 def calcular_debtrank_vector(L, C, v):
@@ -296,18 +319,22 @@ def calcular_debtrank_vector(L, C, v):
 
     for i in range(B):
         # Estado inicial: i colapsa
-        h = np.zeros(B)
-        h[i] = 1.0  # [cite: 956]
+        h_initial = np.zeros(B)
+        h_initial[i] = 1.0  # [cite: 956]
+        
+        h = h_initial.copy()
 
         # Propagación (Iterar hasta convergencia o máximo B pasos)
         for t in range(B):
             h_prev = h.copy()
-            # h_j(t) = min(1, h_j(t-1) + sum(W_kj * h_k(t-1)))
-            # W[k,j] es impacto DE k SOBRE j.
-            # Matricialmente: h_new = h + h @ W
-
-            impact_received = np.dot(h_prev, W)
-            h = np.minimum(1.0, h_prev + impact_received)
+            
+            # DebtRank Correcto: Fixed Point Iteration
+            # h(t+1) = min(1, h_initial + sum(h(t) * W))
+            # No acumulamos el flujo sobre el nivel previo, sino que recalculamos 
+            # el nivel total de distress sostenido por la red.
+            
+            impact_from_network = np.dot(h, W)
+            h = np.minimum(1.0, h_initial + impact_from_network)
 
             if np.allclose(h, h_prev):
                 break
