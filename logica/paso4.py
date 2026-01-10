@@ -127,11 +127,33 @@ def paso4(
         np.sum(depositos_finales) + np.sum(ingresos_ventas), np.sum(riqueza_hogares)
     ), "Error SFC: El dinero se ha creado o destruido en el intercambio."
 
+    # -------------------------------------------------------------------------
+    # 7. Matriz de Consumo (H-F)
+    # -------------------------------------------------------------------------
+    # Generar matriz dispersa de flujos monetarios.
+    # consumption_matrix[h, f] = gasto_efectivo_hogar[h] si compro en f
+    
+    consumption_matrix = np.zeros((H, F))
+    
+    # Vectorized assignment
+    # Usamos fancy indexing: filas=range(H), cols=firmas_elegidas
+    # Solo asignamos si el gasto > 0
+    
+    mask_gasto = gasto_efectivo_hogar > 1e-9
+    if np.any(mask_gasto):
+        # Filtramos para no llenar de ceros o indices invalidos (aunque firmas_elegidas siempre es valido)
+        h_idx = np.arange(H)[mask_gasto]
+        f_idx = firmas_elegidas[mask_gasto]
+        gastos = gasto_efectivo_hogar[mask_gasto]
+        
+        consumption_matrix[h_idx, f_idx] = gastos
+
     return (
-        ventas_cantidad_real,  # Q vendida
-        ingresos_ventas,  # Revenue
-        inventario_final,  # Stock t+1
-        depositos_finales,  # Ahorro t+1
-        demanda_cantidad_teorica,  # Dato para expectativas (D_expected)
-        ingreso_salarial_per_capita,  # Dato informativo (opcional)
+        ventas_cantidad_real,
+        ingresos_ventas,
+        inventario_final,
+        depositos_finales,
+        demanda_cantidad_teorica,
+        ingreso_salarial_per_capita,
+        consumption_matrix, # (H, F) Monetary Flow
     )

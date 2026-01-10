@@ -96,8 +96,11 @@ def paso2(
     # Diagonal infinita (no prestarse a sí mismo)
     np.fill_diagonal(r_ib_total, np.inf)
 
+    # [FIX] Break ties randomly (At t=0 all rates are equal, causing everyone to target Bank 0)
+    noise = np.random.uniform(0, 1e-9, (B, B))
+    
     # Cada fila 'i' busca el mínimo en columnas 'j'
-    mejores_lenders_idx = np.argmin(r_ib_total, axis=1)  # Vector (B,)
+    mejores_lenders_idx = np.argmin(r_ib_total + noise, axis=1)  # Vector (B,)
     costos_refinanciacion = r_ib_total[np.arange(B), mejores_lenders_idx]
 
     # -------------------------------------------------------------------------
@@ -152,7 +155,13 @@ def paso2(
     # -------------------------------------------------------------------------
     # 5. Ejecución de Préstamos (Secuencial)
     # -------------------------------------------------------------------------
-    nuevos_prestamos = np.zeros(F)
+    # -------------------------------------------------------------------------
+    # 5. Ejecución de Préstamos (Secuencial)
+    # -------------------------------------------------------------------------
+    # Matriz de Nuevos Préstamos: (F, B)
+    # Filas: Empresas, Columnas: Bancos
+    nuevos_prestamos_matrix = np.zeros((F, B))
+    
     nueva_matriz_ib = pasivos_interbancarios.copy()
     liquidez_actual = liquidez_bancos.copy()
 
@@ -174,7 +183,7 @@ def paso2(
         # Usamos EPSILON para robustez numérica
         if liquidez_actual[b] >= (monto - EPSILON):
             liquidez_actual[b] -= monto
-            nuevos_prestamos[f] = monto
+            nuevos_prestamos_matrix[f, b] = monto
 
         # Caso 2: Necesita interbancario
         else:
@@ -192,13 +201,13 @@ def paso2(
                 # Actualizar Red de Pasivos: Banco b ahora debe a Lender
                 nueva_matriz_ib[b, lender] += faltante
 
-                nuevos_prestamos[f] = monto
+                nuevos_prestamos_matrix[f, b] = monto
             else:
                 # Credit Crunch: Préstamo denegado
-                nuevos_prestamos[f] = 0.0
+                pass
 
     return (
-        nuevos_prestamos,
+        nuevos_prestamos_matrix, # Matrix (F, B)
         tasas_finales,
         nueva_matriz_ib,
         liquidez_actual,

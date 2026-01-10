@@ -6,35 +6,29 @@ def paso5(
     # --- Estado Empresas ---
     liquidez_empresas,  # (F,) Liquidez post-salarios (Paso 3)
     ingresos_ventas,  # (F,) Revenue (Paso 4)
-    deuda_empresas,  # (F,) Principal acumulado
-    tasa_empresas,  # (F,) Tasa de interés pactada
     equity_empresas,  # (F,) Patrimonio neto previo
-    banco_acreedor_empresa,  # (F,) Índice del banco prestamista
+    
+    # [Refactor] Relaciones Matriciales FB (F, B)
+    pasivos_fb, # Deuda de Empresa F con Banco B
+    tasas_fb,   # Tasa de interés pactada entre F y B
+    
     # --- Estado Bancos ---
     liquidez_bancos,  # (B,)
     equity_bancos,  # (B,)
     pasivos_interbancarios,  # (B,B) Matriz L_ij (Fila i debe a Col j)
     tasas_interbancarias,  # (B,B) Tasas r_ij
     # --- Estado Hogares ---
-    depositos_hogares,  # (H,) Para referencia (no se modifica aquí, se devuelve dividendo per capita)
-    tax_matrix_ib=None, # [Refactor] Matriz de impuestos (componente de tasa)
+    depositos_hogares,  # (H,) Para referencia
+    tax_matrix_ib=None, # Matriz de impuestos
 ):
     """
-    Paso 5: Contabilidad, Dividendos y Gestión de Quiebras (Cascadas).
-
-    1. Empresas pagan deuda parcial (tau) y cobran ventas.
-    2. Chequeo de quiebra de empresas -> Impacto en Bancos (Write-off).
-    3. Bancos pagan deuda interbancaria parcial (tau).
-    4. Chequeo de quiebra de bancos -> Cascada de impagos Interbancarios.
-    5. Pago de dividendos (agentes sanos).
-    6. Reset de agentes quebrados (Renacimiento).
-
-    Ref: [cite: 193, 197, 227, 234-239]
+    Paso 5: Contabilidad, Dividendos y Gestión de Quiebras.
+    Refactorizado para relaciones matriciales completas.
     """
     F = p.F
     B = p.B
     
-    # Manejo de default para tax_matrix (si no se usa SRT/Tobin es 0)
+    # Manejo de default para tax_matrix
     if tax_matrix_ib is None:
         tax_matrix_ib = np.zeros((B, B))
 
@@ -42,29 +36,34 @@ def paso5(
     # A. CONTABILIDAD EMPRESAS
     # =========================================================================
 
-    # 1. Calcular Obligaciones de Deuda (Intereses + Principal)
-    # Ref: "repay tau percent of their outstanding debt"
-    # Deuda Total = Principal * (1 + tasa)
-    # (Asumiendo que tasa es por periodo, o ajustada)
-    deuda_total_con_intereses = deuda_empresas * (1 + tasa_empresas)
-    pago_requerido = deuda_total_con_intereses * p.TAU
-
-    # Intereses devengados (solo la parte de interés)
-    intereses_empresas = deuda_empresas * tasa_empresas
-
-    # 2. Actualizar Liquidez (Cash Flow)
-    # Liquidez Final = (Liquidez Inicial - Salarios) + Ventas - Pago Deuda
-    # Nota: liquidez_empresas input ya descontó salarios en Paso 3.
-    liquidez_final_empresas = liquidez_empresas + ingresos_ventas - pago_requerido
-
+    # 1. Calcular Obligaciones de Deuda (Matricial)
+    # Intereses = Principal * Tasa
+    intereses_matriz = pasivos_fb * tasas_fb
+    
+    # Amortización = Principal * Tau
+    # Ojo: El paper dice "repay tau percent of their outstanding debt".
+    # Asumimos que es sobre el principal.
+    amortizacion_matriz = pasivos_fb * p.TAU
+    
+    pago_total_requerido_matriz = intereses_matriz + amortizacion_matriz
+    
+    # Pagos totales por empresa (Suma filas)
+    pago_total_empresas = np.sum(pago_total_requerido_matriz, axis=1) # Vector (F,)
+    
+    # 2. Actualizar Liquidez
+    # Liquidez = (Liquidez prev + Ventas) - Pagos deuda
+    liquidez_final_empresas = liquidez_empresas + ingresos_ventas - pago_total_empresas
+    
     # 3. Calcular Beneficio y Equity Pre-Dividendo
     # Método Stock-Flow: Equity_new = Liquidez_final - Deuda_Pendiente
-    deuda_remanente_empresas = deuda_total_con_intereses - pago_requerido
+    deuda_remanente_empresas = pasivos_fb - amortizacion_matriz  # (Matrix F, B)
+    
+    # Total vector for accounting
+    deuda_total_remanente = np.sum(deuda_remanente_empresas, axis=1)
 
     # Patrimonio Neto Actualizado
-    equity_post_operaciones = liquidez_final_empresas - deuda_remanente_empresas
-
-    # Beneficio del periodo (Cambio en Equity)
+    equity_post_operaciones = liquidez_final_empresas - deuda_total_remanente
+    
     beneficio_empresas = equity_post_operaciones - equity_empresas
 
     # 4. Detectar Quiebras (Illiquidity & Insolvency)
@@ -76,81 +75,70 @@ def paso5(
 
     # 5. Ejecutar Quiebras de Empresas -> Impacto en Bancos
     perdidas_bancos_por_empresas = np.zeros(B)
+    
+    # Logic is handled by matrix write-off below, but we calculate losses here for reporting
+    perdidas_matriz = deuda_remanente_empresas.copy()
+    perdidas_matriz[~mask_quiebra_empresas, :] = 0.0
+    perdidas_bancos_por_empresas = np.sum(perdidas_matriz, axis=0)
+    
+    # No need for manual loop over indices_quiebra_F since we used matrix operations
 
-    indices_quiebra_F = np.where(mask_quiebra_empresas)[0]
-
-    for f in indices_quiebra_F:
-        b = int(banco_acreedor_empresa[f])
-        # El banco pierde la deuda remanente que esperaba cobrar a futuro.
-        # "Write off... as defaulted credits" [cite: 234]
-        # Asumimos recuperación cero.
-        monto_perdido = deuda_remanente_empresas[f]
-        if monto_perdido > 0:
-            perdidas_bancos_por_empresas[b] += monto_perdido
 
     # =========================================================================
     # B. CONTABILIDAD BANCOS (PRE-CASCADA)
     # =========================================================================
 
     # 1. Cobros de Empresas (Sanas)
-    # Los pagos de las quebradas ya se "perdieron" o se cobró lo que se pudo en liquidez.
-    # Simplificación: El banco cobra 'pago_requerido' solo de las empresas NO quebradas.
-    cobros_empresas = np.zeros(B)
-    np.add.at(
-        cobros_empresas,
-        banco_acreedor_empresa[~mask_quiebra_empresas].astype(int),
-        pago_requerido[~mask_quiebra_empresas],
-    )
+    # Los bancos cobran 'pago_total_requerido' de filas NO quebradas.
+    cobros_matriz = pago_total_requerido_matriz.copy()
+    cobros_matriz[mask_quiebra_empresas, :] = 0.0 # Los quebrados no pagan (o pagan con liquidacion, aqui simplificado a 0)
+    
+    cobros_empresas = np.sum(cobros_matriz, axis=0) # Vector (B,)
+    
+    # Intereses Ganados de Empresas (Realmente cobrados)
+    intereses_cobrados_matriz = intereses_matriz.copy()
+    intereses_cobrados_matriz[mask_quiebra_empresas, :] = 0.0
+    intereses_cobrados_reales = np.sum(intereses_cobrados_matriz, axis=0)
 
     # 2. Pagos Interbancarios (Salidas)
-    # Deuda IB Total = L_ij * (1 + r_ij)
-    matriz_deuda_ib_total = pasivos_interbancarios * (1 + tasas_interbancarias)
-    pago_ib_requerido_matriz = matriz_deuda_ib_total * p.TAU
-
-    total_pagar_ib = np.sum(pago_ib_requerido_matriz, axis=1)  # Banco i paga
-    total_cobrar_ib = np.sum(pago_ib_requerido_matriz, axis=0)  # Banco i cobra
-
-    # 3. Liquidez Bancaria Pre-Dividendo
+    # Deuda IB Total = L_ij * (1 + r_ij) (Esto asume deuda con interes capitalizado?)
+    # El código previo hacia: pasivos * (1+tasa).
+    # Coherencia con FB: Intereses + Amortizacion.
+    # Si pasivos_ibs es PRINCIPAL:
+    intereses_ib = pasivos_interbancarios * tasas_interbancarias
+    amortizacion_ib = pasivos_interbancarios * p.TAU
+    pago_ib_matriz = intereses_ib + amortizacion_ib
+    
+    # Banco i paga (suma filas)
+    total_pagar_ib = np.sum(pago_ib_matriz, axis=1)
+    
+    # Banco j cobra (suma cols)
+    total_cobrar_ib = np.sum(pago_ib_matriz, axis=0)
+    
+    # 3. Liquidez Bancaria
     liquidez_final_bancos = (
         liquidez_bancos + cobros_empresas + total_cobrar_ib - total_pagar_ib
     )
-
-    # 4. Equity Bancario Pre-Cascada
-    # Equity_new = Equity_old + (Intereses Ganados - Intereses Pagados) - Perdidas_Empresas
-
-    # Intereses Ganados de Empresas (Solo de las vivas)
-    intereses_cobrados_reales = np.zeros(B)
-    intereses_potenciales = intereses_empresas.copy()
-    intereses_potenciales[mask_quiebra_empresas] = 0  # No se cobra interés de muertos
-    np.add.at(
-        intereses_cobrados_reales,
-        banco_acreedor_empresa.astype(int),
-        intereses_potenciales,
-    )
-
-    # Intereses IB
-    # [Refactor] Separar Impuestos del Beneficio Bancario
-    # Total Interest = Base + Tax
-    # Lender Profits = Base Interest
-    # Gov/Fund Revenue = Tax
     
-    total_intereses_ib_pagados = pasivos_interbancarios * tasas_interbancarias
+    # 4. Equity Bancario
+    # Profit = (Intereses Empresas + Intereses IB Ganados - Intereses IB Pagados) - Perdidas Credito - Taxes
     
-    # Calcular Revenue Fiscal: Tax_Rate * Principal
+    # Impuestos IB (Revenue Fiscal)
+    # Tax Rate matrix applied to Principal
     revenue_fiscal_ib = pasivos_interbancarios * tax_matrix_ib
+    total_revenue_fiscal = np.sum(revenue_fiscal_ib)
     
-    # El prestamista gana: Total Pagado - Impuesto (i.e. Base Interest)
-    ganancia_intereses_lender_ib = total_intereses_ib_pagados - revenue_fiscal_ib
+    # Intereses IB Ganados (Lender) = Base Interest (Total - Tax)
+    # Asumimos que tasa total incluía tax.
+    ganancia_intereses_lender_ib = intereses_ib - revenue_fiscal_ib
     
-    intereses_ib_ganados = np.sum(ganancia_intereses_lender_ib, axis=0)
-    intereses_ib_pagados = np.sum(total_intereses_ib_pagados, axis=1) # El deudor paga todo
+    intereses_ib_ganados = np.sum(ganancia_intereses_lender_ib, axis=0) # Sum col
+    intereses_ib_pagados = np.sum(intereses_ib, axis=1) # Sum row
     
-    total_revenue_fiscal = np.sum(revenue_fiscal_ib) # Fondos para el público
-
     beneficio_operativo = (
         intereses_cobrados_reales + intereses_ib_ganados - intereses_ib_pagados
     )
-
+    
     equity_bancos_actual = (
         equity_bancos + beneficio_operativo - perdidas_bancos_por_empresas
     )
@@ -166,8 +154,12 @@ def paso5(
     cola_para_procesar = np.where(mask_quiebra_bancos)[0].tolist()
 
     # Matriz de exposición principal remanente (Principal pendiente)
-    # Lo que queda por cobrar tras el pago de cuota tau
-    matriz_ib_remanente = matriz_deuda_ib_total - pago_ib_requerido_matriz
+    # Lo que queda por cobrar tras el pago de cuota tau (que se asume pagada si había liquidez, 
+    # o si no había, la deuda entera es lo que cuenta para contagio? 
+    # Paper: "remaining interbank debt".
+    # Asumimos que la amortización de este turno se descontó contablemente.
+    # Remanente = Principal * (1 - TAU)
+    matriz_ib_remanente = pasivos_interbancarios * (1.0 - p.TAU)
     
     total_perdidas_contagio = 0.0
 

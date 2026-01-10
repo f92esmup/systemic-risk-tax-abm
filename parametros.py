@@ -58,5 +58,5 @@ class Param:
 
     EQUITY_INICIAL_BANCOS = 200.0
     EQUITY_INICIAL_BANCOS = 200.0
-    LIQUIDEZ_INICIAL_BANCOS = 200.0 # [Tuning] Reducido para forzar mercado interbancario (Demand ~5000 > Supply 4000)
+    LIQUIDEZ_INICIAL_BANCOS = 250.0 # [Tuning] Equilibrio: Supply 5000 ~ Demand 5000. Maxima friccion/interaccion.
     DEPOSITOS_INICIALES_HOGARES = 10.0

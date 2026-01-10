@@ -29,24 +29,60 @@ plt.rcParams.update(PARAMS)
 OUTPUT_DIR = "output_plots"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-SIMULATIONS_PER_MODE = 20  # Cantidad de simulaciones para suavizado estadístico
+SIMULATIONS_PER_MODE = 5  # Cantidad de simulaciones para suavizado estadístico
 
 # =============================================================================
 # MOTOR DE SIMULACIÓN
 # =============================================================================
-def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None):
+# =============================================================================
+# MOTOR DE SIMULACIÓN Y LOGGING
+# =============================================================================
+import pandas as pd
+import shutil
+
+def guardar_datos_parquet(run_id, t, agents_data, networks_data, output_dir="outputdata"):
     """
-    Ejecuta una simulación completa del modelo CRISIS.
+    Guarda el estado del sistema en Parquet.
+    Estructura: outputdata/run_{id}/step_{t}/...
+    """
+    step_dir = os.path.join(output_dir, f"run_{run_id}", f"step_{t}")
+    os.makedirs(step_dir, exist_ok=True)
+    
+    # 1. Agentes
+    for name, df in agents_data.items():
+        df.to_parquet(os.path.join(step_dir, f"{name}.parquet"))
+        
+    # 2. Redes (Matrices) - Guardar como Edgelist para eficiencia
+    for name, matrix in networks_data.items():
+        # Convertir a Sparse COnvertiblo o Edgelist
+        # Si es densa pequeña (20x20) guardar directa, si es grande (100x1300) edgelist
+        if matrix.size < 10000:
+             # Guardar como CSV/Parquet matriz completa
+             pd.DataFrame(matrix).to_parquet(os.path.join(step_dir, f"{name}_matrix.parquet"))
+        else:
+             # Edgelist: row, col, val
+             rows, cols = np.nonzero(matrix)
+             vals = matrix[rows, cols]
+             if len(vals) > 0:
+                 df_edge = pd.DataFrame({'source': rows, 'target': cols, 'weight': vals})
+                 df_edge.to_parquet(os.path.join(step_dir, f"{name}_edges.parquet"))
+
+def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
+    """
+    Ejecuta una simulación completa del modelo CRISIS con lógica matricial.
     """
     if semilla is not None:
         np.random.seed(semilla)
         
+    # Limpiar/Crear directorio run si es t=0 (hecho por caller o aqui)
+    # create_run_dir(run_id) 
+        
     start_time = time.time()
-    # print(f"--- Iniciando Simulación: {modo_impuesto} ---")
 
     # 1. INICIALIZACIÓN
     F, B, H = p.F, p.B, p.H
     
+    # AGENTS STATE
     precios = np.full(F, p.PRECIO_INICIAL)
     produccion = np.full(F, p.PRODUCCION_INICIAL)
     ventas = produccion.copy()
@@ -54,11 +90,18 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None):
     
     equity_empresas = np.full(F, p.EQUITY_INICIAL_FIRMAS)
     liquidez_empresas = np.full(F, p.LIQUIDEZ_INICIAL_FIRMAS)
-    deuda_empresas = np.zeros(F)
     
-    banco_acreedor_empresa = np.random.randint(0, B, size=F)
-    tasa_empresas = np.full(F, p.R_BAR)
-
+    # [Refactor] Matrix State
+    # Pasivos FB: Deuda (F, B). Inicialmente 0.
+    pasivos_fb = np.zeros((F, B))
+    tasas_fb = np.zeros((F, B)) # Tasas de esos contratos
+    
+    # Matriz Laboral (F, H): Inicialmente asignada aleatoria o vacia?
+    # Para cumplir "full employment" inicial:
+    # Asignamos H a F aleatoriamente
+    labor_matrix = np.zeros((F, H)) 
+    # (Se poblará/usará en paso 3 dinámicamente si es spot, o static)
+    
     equity_bancos = np.full(B, p.EQUITY_INICIAL_BANCOS)
     liquidez_bancos = np.full(B, p.LIQUIDEZ_INICIAL_BANCOS)
     
@@ -66,10 +109,14 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None):
     tasas_interbancarias = np.zeros((B, B)) 
 
     depositos_hogares = np.full(H, p.DEPOSITOS_INICIALES_HOGARES)
+    # [Refactor] Households-Banks Relationship
+    # Asignamos cada hogar a un banco principal aleatorio
+    banco_principal_hogar = np.random.randint(0, B, size=H)
+    
     dividendos_previos = np.zeros(H)
     mask_renacidas = np.zeros(F, dtype=bool)
 
-    # Historia
+    # Historia (Aggregates for Plots)
     historia = {
         "t": [],
         "DebtRank_Promedio": [],
@@ -91,14 +138,35 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None):
         )
         precios = nuevos_precios
 
-        # Paso 2: Crédito
-        (nuevos_prestamos, tasas_finales, nueva_matriz_ib, 
+        # Paso 2: Crédito (Matrix FB)
+        # Necesitamos pasar deuda total actual para leverage calc
+        deuda_total_empresas = np.sum(pasivos_fb, axis=1)
+        
+        (nuevos_prestamos_matrix, tasas_finales, nueva_matriz_ib, 
          liquidez_bancos_post, bancos_elegidos, matriz_impuestos, debug_data) = paso2(
             demanda_credito, liquidez_bancos, equity_bancos,
-            pasivos_interbancarios, equity_empresas, deuda_empresas,
+            pasivos_interbancarios, equity_empresas, deuda_total_empresas,
             modo_impuesto=modo_impuesto
         )
         
+        # Debemos actualizar Pasivos FB y Tasas FB con los nuevos prestamos
+        # Nuevos prestamos (F,B). Sumamos al stock.
+        # Tasas: Si hay nuevo prestamo, actualizamos la tasa (simplificación: average rate or marginal?)
+        # Asumimos marginal rate replaces old rate for simplicity or weighted?
+        # Modelo simple: New loan updates rate.
+        mask_new_loans = nuevos_prestamos_matrix > 0
+        pasivos_fb += nuevos_prestamos_matrix
+        
+        # Actualizamos tasa donde hubo nuevo prestamo.
+        # tasas_finales es vector (F). Explotamos a (F,B) usando bancos_elegidos?
+        # paso2 returns tasas_finales vector (best offer).
+        # We need to map this to the specific bank column.
+        # bancos_elegidos (F) indices.
+        # Logic: tasas_fb[f, bancos_elegidos[f]] = tasas_finales[f] IF loan > 0
+        for f in range(F):
+            if mask_new_loans[f, bancos_elegidos[f]]:
+                tasas_fb[f, bancos_elegidos[f]] = tasas_finales[f]
+
         # Guardar datos scatter SRT
         if "delta_el" in debug_data and t % 50 == 0:
             historia["SRT_Scatter"][f"t_{t}"] = {
@@ -106,10 +174,6 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None):
                 "Pasivos_IB": pasivos_interbancarios.copy()
             }
 
-        # Actualizar estado financiero intermedio
-        deuda_empresas += nuevos_prestamos
-        tasa_empresas = tasas_finales
-        banco_acreedor_empresa = bancos_elegidos
         pasivos_interbancarios = nueva_matriz_ib
         liquidez_bancos = liquidez_bancos_post
         
@@ -124,17 +188,20 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None):
             dr_vector = np.zeros(B)
             avg_dr = 0.0
 
-        # Paso 3: Producción
+        # Paso 3: Producción (Matrix FH implied)
+        # Sumamos nuevos prestamos por empresa para caja
+        nuevos_prestamos_total = np.sum(nuevos_prestamos_matrix, axis=1)
+        
         (produccion_real, oferta_bienes, empleo_real, 
-         factura_pagada, liquidez_empresas_post) = paso3(
-            demanda_laboral, liquidez_empresas, nuevos_prestamos, inventario
+         factura_pagada, liquidez_empresas_post, wages_matrix_FH) = paso3(
+            demanda_laboral, liquidez_empresas, nuevos_prestamos_total, inventario
         )
         produccion = produccion_real
         liquidez_empresas = liquidez_empresas_post
         
-        # Paso 4: Consumo
+        # Paso 4: Consumo (Matrix HF)
         (ventas_real, ingresos_ventas, inventario_final, 
-         depositos_post, demanda_teorica, _) = paso4(
+         depositos_post, demanda_teorica, _, consumption_matrix_HF) = paso4(
             precios, oferta_bienes, factura_pagada, depositos_hogares,
             dividendos_previos
         )
@@ -142,13 +209,16 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None):
         inventario = inventario_final
         depositos_hogares = depositos_post
         
-        # Paso 5: Contabilidad
-        (liquidez_empresas_end, equity_empresas_end, deuda_empresas_end, 
+        # Actualizar H-B Deposits Matrix (Virtual)
+        # deposits_hb[h, banco_principal[h]] = depositos_hogares[h]
+        
+        # Paso 5: Contabilidad (Matrix FB)
+        (liquidez_empresas_end, equity_empresas_end, deuda_remanente_fb, 
          mask_quiebra_F, liquidez_bancos_end, equity_bancos_end, 
          mask_quiebra_B, pasivos_ib_end, dividendos_pc, 
          total_quiebras_B, total_losses_contagion) = paso5(
-            liquidez_empresas, ingresos_ventas, deuda_empresas, tasa_empresas,
-            equity_empresas, banco_acreedor_empresa,
+            liquidez_empresas, ingresos_ventas, equity_empresas,
+            pasivos_fb, tasas_fb, # Matrix inputs
             liquidez_bancos, equity_bancos, pasivos_interbancarios, tasas_interbancarias,
             depositos_hogares,
             tax_matrix_ib=matriz_impuestos
@@ -157,14 +227,20 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None):
         # Actualización final
         liquidez_empresas = liquidez_empresas_end
         equity_empresas = equity_empresas_end
-        deuda_empresas = deuda_empresas_end
+        pasivos_fb = deuda_remanente_fb # Matrix update
+        
         liquidez_bancos = liquidez_bancos_end
         equity_bancos = equity_bancos_end
         pasivos_interbancarios = pasivos_ib_end
         dividendos_previos = np.full(H, dividendos_pc)
         mask_renacidas = mask_quiebra_F
+        
+        # Reset de Tasas/Relaciones FB si quiebra
+        # paso5 already handles write-off in deuda_remanente_fb (sets row to 0)
+        # Pero tasas? Deberíamos resetear tasas a 0 para muertos.
+        tasas_fb[mask_quiebra_F, :] = 0.0
 
-        # Registro
+        # Registro Aggregado
         historia["t"].append(t)
         historia["DebtRank_Promedio"].append(avg_dr)
         historia["Total_Deuda_Interbancaria"].append(V_total)
@@ -179,143 +255,97 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None):
                 "DebtRank": dr_vector.copy(),
                 "Equity_Bancos": equity_bancos.copy()
             }
+            
+        # --- PARQUET LOGGING ---
+        # Data Preparation
+        agents = {
+            "firms": pd.DataFrame({
+                "id": range(F), 
+                "liq": liquidez_empresas, 
+                "eq": equity_empresas, 
+                "prod": produccion
+            }),
+            "banks": pd.DataFrame({
+                "id": range(B), 
+                "liq": liquidez_bancos, 
+                "eq": equity_bancos,
+                "dr": dr_vector # [NEW] Saved specifically for plotting Fig 3b
+            }),
+            "households": pd.DataFrame({
+                "id": range(H), 
+                "dep": depositos_hogares, 
+                "bank_id": banco_principal_hogar
+            })
+        }
+        
+        # Global Metrics (Scalars)
+        # Saved as a single-row DataFrame for consistency
+        metrics_df = pd.DataFrame([{
+            "t": t,
+            "volume_ib": V_total,
+            "avg_dr": avg_dr,
+            "cascade_size": total_quiebras_B,
+            "contagion_loss": total_losses_contagion,
+            "total_eq_banks": np.sum(equity_bancos)
+        }])
+        
+        # Add metrics to agents dict for saving (hacky but keeps signature clean)
+        # or separate category. Let's iterate `agents` as "Tabular Data"
+        agents["globals"] = metrics_df
 
-    # print(f"Simulacion finalizada ({mode_label}) en {time.time()-start_time:.2f}s")
+        # SRT Scatter Data (Delta EL)
+        # Only relevant for SRT mode step-analysis, but if we want to reproduce Fig 3d:
+        # We need the Delta_EL matrix.
+        if "delta_el" in debug_data:
+            # Flatten or save matrix? Matrix is better.
+            # We add it to networks/matrices list.
+            # debug_data["delta_el"] is (B,B)
+            # Pass it as a network with a special name
+            pass 
+            
+        # Construir matrices "completas" para graph
+        # Deposits HB Matrix: Sparse
+        deposits_hb_matrix = np.zeros((H, B))
+        deposits_hb_matrix[np.arange(H), banco_principal_hogar] = depositos_hogares
+        
+        networks = {
+            "net_FB": pasivos_fb, # Debt
+            "net_BB": pasivos_interbancarios, # Interbank
+            "net_FH": wages_matrix_FH, # Labor Flows
+            "net_HF": consumption_matrix_HF, # Consumption Flows
+            "net_HB": deposits_hb_matrix # Deposits Stocks
+        }
+        
+        if "delta_el" in debug_data:
+            networks["matrix_delta_el"] = debug_data["delta_el"]
+        
+        guardar_datos_parquet(run_id, t, agents, networks)
+
     return historia
 
 # =============================================================================
-# EXPERIMENTO Y PLOTTING
+# EXPERIMENTO
 # =============================================================================
 def run_experiment():
     modes = ["NINGUNO", "TOBIN", "SRT"]
-    colors = {"NINGUNO": "red", "TOBIN": "blue", "SRT": "green"}
     
-    results = {m: {
-        "debtrank_profiles": [],
-        "scatter_data": [],
-        "total_losses": [],
-        "cascade_sizes": [],
-        "volumes": []
-    } for m in modes}
-
     print(f"--- Iniciando Experimento Comparativo ({SIMULATIONS_PER_MODE} runs/modo) ---")
     
     for mode in modes:
         print(f"Modo: {mode} ", end="")
         for i in range(SIMULATIONS_PER_MODE):
-            h = ejecutar_simulacion(modo_impuesto=mode, semilla=42+i)
-            
-            # Recolectar datos
-            # Fig 3b
-            if "t_499" in h["Snapshots"]:
-                results[mode]["debtrank_profiles"].append(h["Snapshots"]["t_499"]["DebtRank"])
-            
-            # Fig 3d
-            for k, data in h["SRT_Scatter"].items():
-                l = data["Pasivos_IB"].flatten()
-                d = data["Delta_EL"].flatten()
-                mask = (l > 1e-6) & (d > 1e-9)
-                if np.any(mask):
-                    results[mode]["scatter_data"].append((l[mask], d[mask]))
-            
-            # Fig 4
-            results[mode]["total_losses"].append(np.sum(h["Eventos_Perdida_Total"]))
-            
-            cascades = h["Eventos_Cascada_Size"]
-            if cascades:
-                results[mode]["cascade_sizes"].extend(cascades)
-            else:
-                results[mode]["cascade_sizes"].append(0)
-            
-            results[mode]["volumes"].append(np.mean(h["Total_Deuda_Interbancaria"]))
+            run_id = f"{mode}_sim_{i}"
+            # Ejecutar y guardar en disco
+            ejecutar_simulacion(modo_impuesto=mode, semilla=42+i, run_id=run_id)
             
             if i % 5 == 0: print(".", end="", flush=True)
         print(" OK")
 
-    return results, colors
-
-def plot_fig_3b(results, colors):
-    plt.figure()
-    B = p.B
-    x = np.arange(1, B + 1)
-    bar_width = 0.25
-    offsets = {"NINGUNO": -bar_width, "TOBIN": 0, "SRT": bar_width}
-    
-    for mode in results:
-        data = results[mode]["debtrank_profiles"]
-        if not data: continue
-        sorted_runs = np.sort(np.array(data), axis=1)[:, ::-1]
-        avg_profile = np.mean(sorted_runs, axis=0)
-        std_profile = np.std(sorted_runs, axis=0)
-        
-        plt.bar(x + offsets[mode], avg_profile, width=bar_width, 
-                color=colors[mode], label=mode, alpha=0.8, yerr=std_profile, capsize=2)
-        
-    plt.xlabel('Bank Rank (by DebtRank)')
-    plt.ylabel('DebtRank $R_i$')
-    plt.title('Fig 3b: Perfil de Riesgo Sistémico')
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(f"{OUTPUT_DIR}/Fig_3b_DebtRank.png")
-    plt.close()
-
-def plot_fig_3d(results, colors):
-    plt.figure()
-    for mode in results:
-        if not results[mode]["scatter_data"]: continue
-        
-        all_l, all_d = [], []
-        for l, d in results[mode]["scatter_data"]:
-            all_l.extend(l)
-            all_d.extend(d)
-        
-        plt.scatter(all_l, all_d, color=colors[mode], alpha=0.3, label=mode, s=10, edgecolors='none')
-        
-    plt.xscale('log')
-    plt.yscale('log')
-    plt.xlabel('Loan Size (Log)')
-    plt.ylabel(r'$\Delta EL^{syst}$ (Log)')
-    plt.title('Fig 3d: Contribución Marginal al Riesgo')
-    plt.legend()
-    plt.grid(True, which="both", ls="-", alpha=0.2)
-    plt.tight_layout()
-    plt.savefig(f"{OUTPUT_DIR}/Fig_3d_Scatter.png")
-    plt.close()
-
-def plot_fig_4(results, colors):
-    # 4a Losses
-    plt.figure()
-    for mode in results:
-        plt.hist(results[mode]["total_losses"], bins=15, color=colors[mode], alpha=0.5, label=mode, density=True)
-    plt.title('Fig 4a: Pérdidas Totales')
-    plt.legend()
-    plt.savefig(f"{OUTPUT_DIR}/Fig_4a_Losses.png")
-    plt.close()
-
-    # 4b Cascades
-    plt.figure()
-    bins = np.arange(0, p.B + 2) - 0.5
-    for mode in results:
-        plt.hist(results[mode]["cascade_sizes"], bins=bins, color=colors[mode], alpha=0.5, label=mode, density=True, histtype='stepfilled')
-    plt.title('Fig 4b: Tamaño de Cascadas')
-    plt.legend()
-    plt.savefig(f"{OUTPUT_DIR}/Fig_4b_Cascades.png")
-    plt.close()
-
-    # 4c Volume
-    plt.figure()
-    for mode in results:
-        plt.hist(results[mode]["volumes"], bins=15, color=colors[mode], alpha=0.5, label=mode, density=True)
-    plt.title('Fig 4c: Volumen Interbancario')
-    plt.legend()
-    plt.savefig(f"{OUTPUT_DIR}/Fig_4c_Volume.png")
-    plt.close()
-
 if __name__ == "__main__":
     print("=== Systemic Risk Tax ABM: Orchestrator ===")
-    data, colors = run_experiment()
-    print("Generando Gráficos...")
-    plot_fig_3b(data, colors)
-    plot_fig_3d(data, colors)
-    plot_fig_4(data, colors)
-    print(f"Listo. Resultados en ./{OUTPUT_DIR}")
+    
+    # 1. Ejecutar Simulaciones
+    run_experiment()
+    
+    print(f"Simulaciones completadas. Datos en ./{OUTPUT_DIR}")
+    print("Para generar gráficas, ejecute: python figuras.py")

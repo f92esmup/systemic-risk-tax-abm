@@ -58,17 +58,61 @@ def paso3(
     factura_salarial_real = empleo_real * p.W_BASE
 
     # Actualizamos la caja de la empresa.
-    # Importante: Las empresas llegan al mercado de consumo (Paso 4) con la caja
-    # mermada tras pagar sueldos. Solo se rellenará si venden.
     liquidez_empresas_post_prod = presupuesto_disponible - factura_salarial_real
-
-    # Corrección de precisión numérica (evitar valores negativos infinitesimales)
     liquidez_empresas_post_prod = np.maximum(liquidez_empresas_post_prod, 0.0)
+
+    # --- MATRICES DE RELACION (F-H) ---
+    # Distribuir la factura salarial entre hogares específicos.
+    # Si no se pasó matriz previa, creamos una estática/aleatoria por ahora
+    # En iteraciones futuras esto debería evolucionar (Hire/Fire).
+    
+    # [Refactor] Generamos una matriz de pagos de salarios (F, H)
+    # Por ahora: Asignación aleatoria uniforme para "cubrir" la demanda.
+    # Un modelo más complejo mantendría "empleados fijos".
+    # Asumimos que todos los hogares proveen trabajo proporcionalmente al mercado
+    # O mejor: Cada empresa tiene un subset de empleados.
+    
+    # Implementación vectorizada simple: 
+    # Repartir el costo salarial de la empresa f entre todos los hogares (mean field)
+    # O mantener la estructura de grafo requerida.
+    
+    # Versión Grafo Denso (Mean Field - Fallback si no hay estado persistente aun):
+    # wages_matrix = np.outer(factura_salarial_real, np.ones(p.H) / p.H)
+    
+    # Versión Grafo Esparso (Random Links cada turno - Spot Market):
+    # Asignamos k trabajadores por empresa.
+    
+    # Dado que Main aun no mantiene el estado "matriz_laboral", generamos
+    # el flujo de pagos (Wages Flow Matrix) aquí.
+    
+    # Para cumplir "Relaciones como matrices":
+    # Vamos a asumir que cada empresa contrata un set aleatorio de empleados en cada paso
+    # proporcional a su tamaño, o simplemente distribuimos.
+    # Para visualización rica, simulemos que contratan a ~N personas.
+    
+    wages_matrix = np.zeros((p.F, p.H))
+    
+    # Optimizacion: Distribuir proporcionalmente seria O(FH).
+    # Usaremos una distribucion determinista basada en indices para velocidad y estabilidad graficable
+    # Cada empresa f paga a los hogares en el rango [f*k, (f+1)*k] (mod H)
+    # Esto crea una matriz "banda" visualmente interesante.
+    
+    # Numero de empleados "graficos" por empresa (solo para visualizacion del link)
+    k_employees = max(1, p.H // p.F) 
+    
+    for f in range(p.F):
+        wage_bill = factura_salarial_real[f]
+        if wage_bill > 0:
+            start_idx = (f * k_employees) % p.H
+            # Asignamos a k empleados
+            indices = np.arange(start_idx, start_idx + k_employees) % p.H
+            wages_matrix[f, indices] = wage_bill / k_employees
 
     return (
         produccion_nueva,
         oferta_total_bienes,
         empleo_real,
-        factura_salarial_real,  # Input clave para el Paso 4 (Ingreso Hogares)
-        liquidez_empresas_post_prod,  # Estado financiero actual de la empresa
+        factura_salarial_real,
+        liquidez_empresas_post_prod,
+        wages_matrix, # (F, H) Payment Flow
     )
