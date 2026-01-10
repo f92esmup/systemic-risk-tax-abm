@@ -1,70 +1,88 @@
-# Este script computa el paso 1 "Las empresas definen la demanda de trabajo y capital".
-from parametros import Param as p
+# logica/paso1.py
 import numpy as np
+from parametros import Param as p
 
 
 def paso1(precios, produccion, ventas):
-    """Calcula la demanda esperada, precio nuevo y demanda de trabajadores.
-    ARGumentos:
-        prices: array de precios de las empresas en t-1.
-        produccion: array de producción de las empresas en t-1.
-        ventas: array de ventas de las empresas en t-1.
-    Retorna:
-        nuevos_precios: array de nuevos precios.
-        demanda_trabajo: array de demanda de trabajo.
-        demanda_esperada: array de demanda esperada.
-        factura_esperada_salarial: array de factura salarial esperada.
+    """
+    Calcula la demanda esperada, precio nuevo y demanda de trabajadores.
+
+    Referencia: Delli Gatti et al. [69], Gualdi et al. [70], Poledna et al. [167].
+    Firms define labour and capital demand[cite: 188].
     """
 
-    # 1.1 Calcular el precio promedio del mercado actual.
+    # --- 1. Definición de Estado ---
     avg_precio = np.mean(precios)
-
-    # 1.2 Determinar regla de ajuste:
-    # comparar precio propio con promedio.
     precio_relativo = precios > avg_precio
 
-    # Compara ventas con producción (exceso si ventas < produccion).
-    # tenemos en cuenta el erro de punto flotante con un epsilon.
+    # Es crucial definir si hubo ventas totales o sobró stock
+    # Usamos un epsilon para float comparison, pero cuidado con el stock acumulado
     exceso_inventario = (produccion - ventas) > 1e-5
 
-    # definimos dirección de ajuste:
+    # --- 2. Matriz de Sensibilidad Estocástica ---
+    # Para evitar sincronización, cada empresa tiene una reactividad ligeramente distinta
+    # en este paso de tiempo.
+    # U(-0.02, 0.02) + SENSIBILIDAD
+    ruido = np.random.uniform(0.8, 1.2, p.F)
+    ajuste_base = p.SENSIBILIDAD_AJUSTE * ruido
 
-    cambio_precio = np.zeros(p.F)  # inicializamos array de cambios.
+    # Inicializamos vectores de cambio
+    cambio_precio = np.zeros(p.F)
     cambio_cantidad = np.zeros(p.F)
 
-    # Caso A: Tengo stock y soy caro -> bajar precio y producir menos.
-    mascara_A = precio_relativo & exceso_inventario
-    cambio_precio[mascara_A] = -p.SENSIBILIDAD_AJUSTE
-    cambio_cantidad[mascara_A] = -p.SENSIBILIDAD_AJUSTE
+    # --- 3. Lógica de Ajuste (Cuadrantes Delli Gatti) ---
 
-    # Caso B: Tengo stock y soy barato -> subir precio y producir más.
-    mascara_B = (~precio_relativo) & (~exceso_inventario)
-    cambio_precio[mascara_B] = p.SENSIBILIDAD_AJUSTE
-    cambio_cantidad[mascara_B] = p.SENSIBILIDAD_AJUSTE
+    # Caso A: Precio Alto + Stock Sobrante -> Bajar Precio, Bajar Cantidad
+    mask_A = precio_relativo & exceso_inventario
+    cambio_precio[mask_A] = -ajuste_base[mask_A]
+    cambio_cantidad[mask_A] = -ajuste_base[mask_A]
 
-    # Caso C: Si tengo stock y soy barato -> producir menos.
-    mascara_C = exceso_inventario & (~precio_relativo)
-    cambio_precio[mascara_C] = 0
-    cambio_cantidad[mascara_C] = -p.SENSIBILIDAD_AJUSTE
+    # Caso B: Precio Bajo + Sin Stock (Venta total) -> Subir Precio, Subir Cantidad
+    mask_B = (~precio_relativo) & (~exceso_inventario)
+    cambio_precio[mask_B] = ajuste_base[
+        mask_B
+    ]  # A veces se usa un ajuste más agresivo aquí
+    cambio_cantidad[mask_B] = ajuste_base[mask_B]
 
-    # Caso D: Si no tengo stock y soy caro -> producir más.
-    mascara_D = (~exceso_inventario) & precio_relativo
-    cambio_precio[mascara_D] = 0
-    cambio_cantidad[mascara_D] = p.SENSIBILIDAD_AJUSTE
+    # Caso C: Precio Bajo + Stock Sobrante -> Mantener Precio, Bajar Cantidad
+    # Si eres barato y no vendes, el problema es la demanda agregada, no tu precio.
+    mask_C = (~precio_relativo) & exceso_inventario
+    cambio_precio[mask_C] = 0.0
+    cambio_cantidad[mask_C] = -ajuste_base[mask_C]
 
-    # 1.3 Aplicar ajustes:
-    # P(t+1) = P(t) * (1 + cambio)
+    # Caso D: Precio Alto + Sin Stock -> Mantener Precio (o subir poco), Subir Cantidad
+    mask_D = precio_relativo & (~exceso_inventario)
+    cambio_precio[mask_D] = 0.0  # O subir levemente 0.5 * ajuste
+    cambio_cantidad[mask_D] = ajuste_base[mask_D]
+
+    # --- 4. Aplicación de Ajustes y Anclaje ---
+
     nuevos_precios = precios * (1 + cambio_precio)
 
-    # D(t+1) = Y(t) * (1 + cambio)
-    demanda_esperada = produccion * (1 + cambio_cantidad)
+    # CORRECCIÓN CRÍTICA: Base de la demanda esperada
+    # Si sobró inventario, la base para calcular el futuro son las VENTAS, no la producción.
+    # Si faltó inventario (ventas == produccion), la base es la PRODUCCIÓN.
 
-    # Cotas para evitar valores negativos
+    base_demanda = np.where(exceso_inventario, ventas, produccion)
+
+    # Para evitar que una empresa con 0 ventas se quede en 0 para siempre,
+    # añadimos un "piso" de reactivación aleatoria o un mínimo base.
+    base_demanda = np.maximum(base_demanda, 0.1)
+
+    demanda_esperada = base_demanda * (1 + cambio_cantidad)
+
+    # --- 5. Cotas de Seguridad (Guardrails) ---
+    # Evitar precios negativos o cero
     nuevos_precios = np.maximum(nuevos_precios, 0.01)
+
+    # Evitar explosiones o implosiones numéricas
     demanda_esperada = np.maximum(demanda_esperada, 0.1)
 
-    # 1.4 Calcular demanda de trabajo:
+    # --- 6. Demanda de Factores ---
+    # Labour demand = Desired Production / Productivity [cite: 208, 214]
     demanda_laboral = demanda_esperada / p.alpha
+
+    # Coste estimado (Budget needed)
     factura_esperada_salarial = demanda_laboral * p.w_base
 
     return nuevos_precios, demanda_laboral, demanda_esperada, factura_esperada_salarial
