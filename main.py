@@ -40,32 +40,10 @@ SIMULATIONS_PER_MODE = 5  # Cantidad de simulaciones para suavizado estadístico
 import pandas as pd
 import shutil
 
-def guardar_datos_parquet(run_id, t, agents_data, networks_data, output_dir="outputdata"):
-    """
-    Guarda el estado del sistema en Parquet.
-    Estructura: outputdata/run_{id}/step_{t}/...
-    """
-    step_dir = os.path.join(output_dir, f"run_{run_id}", f"step_{t}")
-    os.makedirs(step_dir, exist_ok=True)
-    
-    # 1. Agentes
-    for name, df in agents_data.items():
-        df.to_parquet(os.path.join(step_dir, f"{name}.parquet"))
-        
-    # 2. Redes (Matrices) - Guardar como Edgelist para eficiencia
-    for name, matrix in networks_data.items():
-        # Convertir a Sparse COnvertiblo o Edgelist
-        # Si es densa pequeña (20x20) guardar directa, si es grande (100x1300) edgelist
-        if matrix.size < 10000:
-             # Guardar como CSV/Parquet matriz completa
-             pd.DataFrame(matrix).to_parquet(os.path.join(step_dir, f"{name}_matrix.parquet"))
-        else:
-             # Edgelist: row, col, val
-             rows, cols = np.nonzero(matrix)
-             vals = matrix[rows, cols]
-             if len(vals) > 0:
-                 df_edge = pd.DataFrame({'source': rows, 'target': cols, 'weight': vals})
-                 df_edge.to_parquet(os.path.join(step_dir, f"{name}_edges.parquet"))
+from logger import SimulationLogger
+
+# Eliminar antigua función guardar_datos_parquet ya que usamos SimulationLogger
+
 
 def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     """
@@ -78,6 +56,8 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     # create_run_dir(run_id) 
         
     start_time = time.time()
+    logger = SimulationLogger()
+
 
     # 1. INICIALIZACIÓN
     F, B, H = p.F, p.B, p.H
@@ -319,9 +299,12 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         if "delta_el" in debug_data:
             networks["matrix_delta_el"] = debug_data["delta_el"]
         
-        guardar_datos_parquet(run_id, t, agents, networks)
+        logger.log_step(t, agents, networks)
 
+
+    logger.flush(run_id)
     return historia
+
 
 # =============================================================================
 # EXPERIMENTO
