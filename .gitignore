@@ -4,3 +4,4 @@ __pycache__/
 *.npz
 output_data/
 test_*.py
+output*/

@@ -23,7 +23,8 @@ class Param:
     # --- Parámetros de Crédito y Deuda ---
     TAU = 0.05  # Tasa de reembolso de deuda (Rate of debt reimbursement) [cite: 730]
     PHI = 0.8  # Contracción de demanda de crédito si r > r_max [cite: 728]
-    R_MAX = 0.20  # Tasa máxima aceptable (Umbral heurístico, aprox 20%)
+    R_MAX = 0.25  # [Tuning] Aumentado umbral para tolerar tasas más altas al inicio
+
 
     # --- Parámetros de Red y Búsqueda ---
     N_BANCOS_CONTACTADOS = 5  # 'n' Number of applications in credit market [cite: 736]
@@ -51,12 +52,14 @@ class Param:
     TASA_TOBIN = 0.002  # 0.2% tasa fija [cite: 250]
 
     # --- Inicialización (Valores Semilla) ---
-    PRECIO_INICIAL = 1.5  # Precio inicial promedio
-    PRODUCCION_INICIAL = 10.0  # Producción inicial promedio
+    PRECIO_INICIAL = 1.5
+    PRODUCCION_INICIAL = 15.0  # [Tuning] Aumentado para mayor factura salarial 
     EQUITY_INICIAL_FIRMAS = 10.0
-    LIQUIDEZ_INICIAL_FIRMAS = 50.0
+    LIQUIDEZ_INICIAL_FIRMAS = 30.0 # [Tuning] Reducido para forzar demanda crédito
 
-    EQUITY_INICIAL_BANCOS = 200.0
-    EQUITY_INICIAL_BANCOS = 200.0
-    LIQUIDEZ_INICIAL_BANCOS = 250.0 # [Tuning] Equilibrio: Supply 5000 ~ Demand 5000. Maxima friccion/interaccion.
+
+    EQUITY_INICIAL_BANCOS = 500.0   # Aumentado para resistencia
+    LIQUIDEZ_INICIAL_BANCOS = 300.0 # [Tuning] Ajustado para incentivar préstamos
+
     DEPOSITOS_INICIALES_HOGARES = 10.0
+

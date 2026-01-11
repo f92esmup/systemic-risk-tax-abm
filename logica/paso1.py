@@ -27,15 +27,16 @@ def paso1(
     idx_sanas = ~mask_renacidas
     
     # Cálculo seguro de medias usando manejo de excepciones de NumPy implícito (size > 0)
+    # Cálculo seguro de medias
     if np.any(idx_sanas):
         avg_precio_mercado = np.mean(precios_prev[idx_sanas])
         avg_ventas_mercado = np.mean(ventas_prev[idx_sanas])
     else:
-        # Fallback extremo: todas las empresas son nuevas o el mercado colapsó
-        avg_precio_mercado = np.mean(precios_prev)
-        # Evitar división por cero si el mercado está muerto
-        avg_ventas = np.mean(ventas_prev)
+        # Fallback extremo: todas las empresas son nuevas
+        avg_precio_mercado = np.mean(precios_prev) if len(precios_prev) > 0 else 1.0
+        avg_ventas = np.mean(ventas_prev) if len(ventas_prev) > 0 else 1.0
         avg_ventas_mercado = avg_ventas if avg_ventas > 1e-9 else 1.0
+
 
     # -------------------------------------------------------------------------
     # 2. Clasificación de Estado (Adaptive Rule)

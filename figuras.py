@@ -24,9 +24,9 @@ plt.rcParams.update(PARAMS)
 def load_simulation_data(data_dir=DATA_DIR):
     """
     Crawls the outputdata directory and aggregates metrics for plotting.
-    Returns: dictionary structured by mode with lists of run data.
+    Now optimized for Consolidated Parquet Logs (SimulationLogger).
     """
-    modes = ["NINGUNO", "TOBIN", "SRT"] # Detected manually or scanned
+    modes = ["NINGUNO", "TOBIN", "SRT"]
     results = {m: {
         "debtrank_profiles": [],
         "scatter_data": [],
@@ -45,92 +45,80 @@ def load_simulation_data(data_dir=DATA_DIR):
     
     for run_dir in subdirs:
         # Parse mode from run_dir name
-        # Format: run_NINGUNO_sim_0
         parts = run_dir.split("_")
         if len(parts) < 4: continue
         
         mode = parts[1] # NINGUNO, TOBIN, SRT
-        if mode not in results: continue # Skip unknown modes
+        if mode not in results: continue
         
         full_run_path = os.path.join(data_dir, run_dir)
-        steps = sorted([d for d in os.listdir(full_run_path) if d.startswith("step_")], 
-                       key=lambda x: int(x.split("_")[1]))
+
+
+        # --- 1. Global Metrics (Sim-wide) ---
+
         
-        if not steps: continue
-        
-        # Load end-of-run state (Snapshot at T=499 or last available)
-        final_step = steps[-1] 
-        final_step_path = os.path.join(full_run_path, final_step)
-        
-        # --- Metrics for Fig 4 (Time Series Aggregates) ---
-        # We need to aggregate globals.parquet from ALL steps
-        # Optimization: Just read valid globals from all steps
-        
-        globals_list = []
-        for s in steps:
-            g_path = os.path.join(full_run_path, s, "globals.parquet")
-            if os.path.exists(g_path):
-                # Using fast parquet read
-                globals_list.append(pd.read_parquet(g_path))
-        
-        if not globals_list: continue
-        
-        run_metrics = pd.concat(globals_list, ignore_index=True)
-        
-        # Fig 4a: Total Losses (Sum over all time)
-        total_loss = run_metrics["contagion_loss"].sum()
-        results[mode]["total_losses"].append(total_loss)
-        
-        # Fig 4b: Cascades (Individual events > 0)
-        cascades = run_metrics[run_metrics["cascade_size"] > 0]["cascade_size"].tolist()
-        if cascades:
-            results[mode]["cascade_sizes"].extend(cascades)
-        else:
-            results[mode]["cascade_sizes"].append(0)
+        # --- 1. Global Metrics (Sim-wide) ---
+        globals_path = os.path.join(full_run_path, "globals.parquet")
+        if os.path.exists(globals_path):
+            run_metrics = pd.read_parquet(globals_path)
             
-        # Fig 4c: Volumes (Mean over time)
-        avg_vol = run_metrics["volume_ib"].mean()
-        results[mode]["volumes"].append(avg_vol)
-        
-        # --- Metrics for Fig 3b (DebtRank Profile at T=End) ---
-        # Read banks.parquet from final step
-        banks_path = os.path.join(final_step_path, "banks.parquet")
+            # Fig 4a: Total Losses (Sum over all time)
+            total_loss = run_metrics["contagion_loss"].sum()
+            results[mode]["total_losses"].append(total_loss)
+            
+            # Fig 4b: Cascades (Individual events > 0)
+            cascades = run_metrics[run_metrics["cascade_size"] > 0]["cascade_size"].tolist()
+            if cascades:
+                results[mode]["cascade_sizes"].extend(cascades)
+            else:
+                results[mode]["cascade_sizes"].append(0)
+                
+            # Fig 4c: Volumes (Mean over time)
+            avg_vol = run_metrics["volume_ib"].mean()
+            results[mode]["volumes"].append(avg_vol)
+
+        # --- 2. DebtRank Profile (At step T_final) ---
+        banks_path = os.path.join(full_run_path, "banks.parquet")
         if os.path.exists(banks_path):
             banks_df = pd.read_parquet(banks_path)
-            if "dr" in banks_df.columns:
-                results[mode]["debtrank_profiles"].append(banks_df["dr"].values)
+            if "t" in banks_df.columns and "dr" in banks_df.columns:
+                last_t = banks_df["t"].max()
+                # Get data for last step
+                final_banks = banks_df[banks_df["t"] == last_t]
+                # Extract DebtRank vector (sorted by bank id usually, but let's just take values)
+                results[mode]["debtrank_profiles"].append(final_banks["dr"].values)
 
-        # --- Metrics for Fig 3d (Scatter) ---
-        # This requires Delta_EL matrix which might be heavy to load for all steps.
-        # We search specifically for the step that might have it (usually logged every 50 steps check code)
-        # main.py code: logs it if 'delta_el' in debug_data (every 50 steps)
-        # We check specific steps or all.
+        # --- 3. SRT Scatter (Delta EL vs Loan Size) ---
+        # Data needed: Delta EL matrix AND Interbank Loans matrix
+        # Only available if we logged "matrix_delta_el"
         
-        # Optimization: Check specific sampled steps if we know them, or scan.
-        # Let's Scan sampled steps (e.g. t=100, 200...)
-        for s in steps:
-            s_path = os.path.join(full_run_path, s)
-            mat_path = os.path.join(s_path, "matrix_delta_el_matrix.parquet")
+        delta_path = os.path.join(full_run_path, "matrix_delta_el.parquet")
+        loans_path = os.path.join(full_run_path, "net_BB.parquet") # Sparse edge list usually
+
+        if os.path.exists(delta_path) and os.path.exists(loans_path):
+            delta_df = pd.read_parquet(delta_path) # Edgelist: source, target, weight, t
+            loans_df = pd.read_parquet(loans_path) # Edgelist: source, target, weight, t
             
-            # Note: main.py logic for networks dict saving uses name+"_matrix.parquet"
-            # In update 141 we added networks["matrix_delta_el"]
+            # We need to match rows by (t, source, target).
+            # Merge on keys.
+            # Delta EL usually only for specific steps, so inner join filters automatically.
             
-            if os.path.exists(mat_path):
-                # Load Delta EL
-                delta_df = pd.read_parquet(mat_path)
-                delta_vals = delta_df.values.flatten()
+            merged = pd.merge(
+                loans_df, delta_df, 
+                on=["t", "source", "target"], 
+                suffixes=("_loan", "_delta")
+            )
+            
+            if not merged.empty:
+                # Filter noise
+                mask = (merged["weight_loan"] > 1e-6) & (merged["weight_delta"] > 1e-9)
+                valid = merged[mask]
                 
-                # Load Loans (Pasivos IB)
-                loans_path = os.path.join(s_path, "net_BB_matrix.parquet") 
-                # Or edges? Check logic: size < 10000 -> matrix. 20x20 is small.
-                if os.path.exists(loans_path):
-                    loans_df = pd.read_parquet(loans_path)
-                    loans_vals = loans_df.values.flatten()
-                    
-                    # Filter
-                    mask = (loans_vals > 1e-6) & (delta_vals > 1e-9)
-                    if np.any(mask):
-                         results[mode]["scatter_data"].append((loans_vals[mask], delta_vals[mask]))
+                if not valid.empty:
+                    results[mode]["scatter_data"].append((
+                        valid["weight_loan"].values, 
+                        valid["weight_delta"].values
+                    ))
 
     return results
 

@@ -58,7 +58,14 @@ class SimulationLogger:
         Escribe los buffers concatenados a disco en formato Parquet.
         Estructura: output_dir/run_{id}/{component}.parquet
         """
-        run_dir = os.path.join(output_dir, f"run_{run_id}")
+        # Si run_id ya empieza con run_, no duplicar prefijo
+        if run_id.startswith("run_"):
+            dirname = run_id
+        else:
+            dirname = f"run_{run_id}"
+            
+        run_dir = os.path.join(output_dir, dirname)
+
         os.makedirs(run_dir, exist_ok=True)
 
         print(f"   [Logger] Flushing data for run {run_id}...")
