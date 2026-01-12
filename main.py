@@ -62,39 +62,36 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     # 1. INICIALIZACIÓN
     F, B, H = p.F, p.B, p.H
     
-    # AGENTS STATE
-    precios = np.full(F, p.PRECIO_INICIAL)
-    produccion = np.full(F, p.PRODUCCION_INICIAL)
-    ventas = produccion.copy()
-    inventario = np.zeros(F)
-    
-    equity_empresas = np.full(F, p.EQUITY_INICIAL_FIRMAS)
-    liquidez_empresas = np.full(F, p.LIQUIDEZ_INICIAL_FIRMAS)
-    
-    # [Refactor] Matrix State
-    # Pasivos FB: Deuda (F, B). Inicialmente 0.
-    pasivos_fb = np.zeros((F, B))
-    tasas_fb = np.zeros((F, B)) # Tasas de esos contratos
-    
-    # Matriz Laboral (F, H): Inicialmente asignada aleatoria o vacia?
-    # Para cumplir "full employment" inicial:
-    # Asignamos H a F aleatoriamente
-    labor_matrix = np.zeros((F, H)) 
-    # (Se poblará/usará en paso 3 dinámicamente si es spot, o static)
-    
-    equity_bancos = np.full(B, p.EQUITY_INICIAL_BANCOS)
-    liquidez_bancos = np.full(B, p.LIQUIDEZ_INICIAL_BANCOS)
-    
-    pasivos_interbancarios = np.zeros((B, B))
-    tasas_interbancarias = np.zeros((B, B)) 
-
-    depositos_hogares = np.full(H, p.DEPOSITOS_INICIALES_HOGARES)
-    # [Refactor] Households-Banks Relationship
-    # Asignamos cada hogar a un banco principal aleatorio
-    banco_principal_hogar = np.random.randint(0, B, size=H)
-    
-    dividendos_previos = np.zeros(H)
-    mask_renacidas = np.zeros(F, dtype=bool)
+    state = {
+        # Empresas (Firms)
+        'firms_prices': np.full(F, p.PRECIO_INICIAL),
+        'firms_production': np.full(F, p.PRODUCCION_INICIAL),
+        'firms_demand': np.full(F, p.PRODUCCION_INICIAL),
+        'firms_inventory': np.zeros(F),
+        'firms_equity': np.full(F, p.EQUITY_INICIAL_FIRMAS),
+        'firms_liquidity': np.full(F, p.LIQUIDEZ_INICIAL_FIRMAS),
+        'firms_target_production': np.full(F, p.PRODUCCION_INICIAL),
+        'firms_labor_demand': np.zeros(F, dtype=int),
+        'mask_renacidas': np.zeros(F, dtype=bool),
+        
+        # Bancos (Banks)
+        'banks_equity': np.full(B, p.EQUITY_INICIAL_BANCOS),
+        'banks_liquidity': np.full(B, p.LIQUIDEZ_INICIAL_BANCOS),
+        
+        # Hogares (Households)
+        'households_deposits': np.full(H, p.DEPOSITOS_INICIALES_HOGARES),
+        'households_bank': np.random.randint(0, B, size=H),
+        'households_dividends': np.zeros(H),
+        
+        # Redes (Networks)
+        'net_FB': np.zeros((F, B)),
+        'net_BB': np.zeros((B, B)),
+        'rates_FB': np.zeros((F, B)),
+        'rates_BB': np.zeros((B, B)),
+        
+        # Matrices de Flujo (para logger/stats)
+        'labor_matrix': np.zeros((F, H))
+    }
 
     # Historia (Aggregates for Plots)
     historia = {
@@ -110,121 +107,111 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
 
     # 2. BUCLE
     for t in range(p.T):
-        # Paso 1: Planificación
-        (nuevos_precios, demanda_laboral, produccion_necesaria, 
-         demanda_credito, factura_salarial, demanda_obj) = paso1(
-            precios, produccion, ventas, liquidez_empresas, 
-            inventario, mask_renacidas
-        )
-        precios = nuevos_precios
+        # Paso 1: Planificación (Adaptativo - Mark I)
+        update_p1 = paso1(state, p)
+        state['firms_target_production'] = update_p1['firms_target_production']
+        state['firms_prices'] = update_p1['firms_prices']
+        state['firms_labor_demand'] = update_p1['firms_labor_demand']
+
+        # Cálculo de variables intermedias para crédito
+        # Factura salarial teórica (N * w)
+        factura_salarial_teorica = state['firms_labor_demand'] * p.W_BASE
+        
+        # Liquidez para crédito: Si renació t-1, tiene dotación inicial
+        liq_para_credito = np.where(state['mask_renacidas'], p.LIQUIDEZ_INICIAL_FIRMAS, state['firms_liquidity'])
+        demanda_credito = np.maximum(factura_salarial_teorica - liq_para_credito, 0.0)
+        
+        deuda_total_empresas = np.sum(state['net_FB'], axis=1)
 
         # Paso 2: Crédito (Matrix FB)
-        # Necesitamos pasar deuda total actual para leverage calc
-        deuda_total_empresas = np.sum(pasivos_fb, axis=1)
-        
         (nuevos_prestamos_matrix, tasas_finales, nueva_matriz_ib, 
          liquidez_bancos_post, bancos_elegidos, matriz_impuestos, debug_data) = paso2(
-            demanda_credito, liquidez_bancos, equity_bancos,
-            pasivos_interbancarios, equity_empresas, deuda_total_empresas,
+            demanda_credito, state['banks_liquidity'], state['banks_equity'],
+            state['net_BB'], state['firms_equity'], deuda_total_empresas,
             modo_impuesto=modo_impuesto
         )
         
-        # Debemos actualizar Pasivos FB y Tasas FB con los nuevos prestamos
-        # Nuevos prestamos (F,B). Sumamos al stock.
-        # Tasas: Si hay nuevo prestamo, actualizamos la tasa (simplificación: average rate or marginal?)
-        # Asumimos marginal rate replaces old rate for simplicity or weighted?
-        # Modelo simple: New loan updates rate.
-        mask_new_loans = nuevos_prestamos_matrix > 0
-        pasivos_fb += nuevos_prestamos_matrix
-        
-        # Actualizamos tasa donde hubo nuevo prestamo.
-        # tasas_finales es vector (F). Explotamos a (F,B) usando bancos_elegidos?
-        # paso2 returns tasas_finales vector (best offer).
-        # We need to map this to the specific bank column.
-        # bancos_elegidos (F) indices.
-        # Logic: tasas_fb[f, bancos_elegidos[f]] = tasas_finales[f] IF loan > 0
+        # Actualización de Deuda FB y Tasas
+        state['net_FB'] += nuevos_prestamos_matrix
+        # Si hubo préstamo, actualizamos la tasa pactada en esa relación
         for f in range(F):
-            if mask_new_loans[f, bancos_elegidos[f]]:
-                tasas_fb[f, bancos_elegidos[f]] = tasas_finales[f]
+            if np.sum(nuevos_prestamos_matrix[f]) > 0:
+                state['rates_FB'][f, bancos_elegidos[f]] = tasas_finales[f]
 
         # Guardar datos scatter SRT
         if "delta_el" in debug_data and t % 50 == 0:
             historia["SRT_Scatter"][f"t_{t}"] = {
                 "Delta_EL": debug_data["delta_el"].copy(),
-                "Pasivos_IB": pasivos_interbancarios.copy()
+                "Pasivos_IB": state['net_BB'].copy()
             }
 
-        pasivos_interbancarios = nueva_matriz_ib
-        liquidez_bancos = liquidez_bancos_post
+        state['net_BB'] = nueva_matriz_ib
+        state['banks_liquidity'] = liquidez_bancos_post
         
         # Calcular DebtRank (Riesgo Sistémico)
-        total_lending = np.sum(pasivos_interbancarios, axis=0)
+        total_lending = np.sum(state['net_BB'], axis=0)
         V_total = np.sum(total_lending)
         if V_total > 1e-6:
             v_sys = total_lending / V_total
-            dr_vector = calcular_debtrank_vector(pasivos_interbancarios, equity_bancos, v_sys)
+            dr_vector = calcular_debtrank_vector(state['net_BB'], state['banks_equity'], v_sys)
             avg_dr = np.mean(dr_vector)
         else:
             dr_vector = np.zeros(B)
             avg_dr = 0.0
 
-        # Paso 3: Producción (Matrix FH implied)
-        # Sumamos nuevos prestamos por empresa para caja
+        # Paso 3: Producción (Matrix FH)
         nuevos_prestamos_total = np.sum(nuevos_prestamos_matrix, axis=1)
         
         (produccion_real, oferta_bienes, empleo_real, 
          factura_pagada, liquidez_empresas_post, wages_matrix_FH) = paso3(
-            demanda_laboral, liquidez_empresas, nuevos_prestamos_total, inventario
+            state['firms_labor_demand'], state['firms_liquidity'], nuevos_prestamos_total, state['firms_inventory']
         )
-        produccion = produccion_real
-        liquidez_empresas = liquidez_empresas_post
+        state['firms_production'] = produccion_real
+        state['firms_liquidity'] = liquidez_empresas_post
+        state['labor_matrix'] = wages_matrix_FH
         
         # Paso 4: Consumo (Matrix HF)
         (ventas_real, ingresos_ventas, inventario_final, 
          depositos_post, demanda_teorica, _, consumption_matrix_HF) = paso4(
-            precios, oferta_bienes, factura_pagada, depositos_hogares,
-            dividendos_previos
+            state['firms_prices'], oferta_bienes, factura_pagada, state['households_deposits'],
+            state['households_dividends']
         )
-        ventas = ventas_real
-        inventario = inventario_final
-        depositos_hogares = depositos_post
-        
-        # Actualizar H-B Deposits Matrix (Virtual)
-        # deposits_hb[h, banco_principal[h]] = depositos_hogares[h]
+        # IMPORTANTE: Guardamos la demanda para el próximo paso 1
+        state['firms_demand'] = demanda_teorica
+        state['firms_inventory'] = inventario_final
+        state['households_deposits'] = depositos_post
         
         # Paso 5: Contabilidad (Matrix FB)
         (liquidez_empresas_end, equity_empresas_end, deuda_remanente_fb, 
          mask_quiebra_F, liquidez_bancos_end, equity_bancos_end, 
          mask_quiebra_B, pasivos_ib_end, dividendos_pc, 
          total_quiebras_B, total_losses_contagion) = paso5(
-            liquidez_empresas, ingresos_ventas, equity_empresas,
-            pasivos_fb, tasas_fb, # Matrix inputs
-            liquidez_bancos, equity_bancos, pasivos_interbancarios, tasas_interbancarias,
-            depositos_hogares,
+            state['firms_liquidity'], ingresos_ventas, state['firms_equity'],
+            state['net_FB'], state['rates_FB'],
+            state['banks_liquidity'], state['banks_equity'], state['net_BB'], state['rates_BB'],
+            state['households_deposits'],
             tax_matrix_ib=matriz_impuestos
         )
         
-        # Actualización final
-        liquidez_empresas = liquidez_empresas_end
-        equity_empresas = equity_empresas_end
-        pasivos_fb = deuda_remanente_fb # Matrix update
+        # Sincronización final del estado
+        state['firms_liquidity'] = liquidez_empresas_end
+        state['firms_equity'] = equity_empresas_end
+        state['net_FB'] = deuda_remanente_fb
         
-        liquidez_bancos = liquidez_bancos_end
-        equity_bancos = equity_bancos_end
-        pasivos_interbancarios = pasivos_ib_end
-        dividendos_previos = np.full(H, dividendos_pc)
-        mask_renacidas = mask_quiebra_F
+        state['banks_liquidity'] = liquidez_bancos_end
+        state['banks_equity'] = equity_bancos_end
+        state['net_BB'] = pasivos_ib_end
+        state['households_dividends'] = np.full(H, dividendos_pc)
+        state['mask_renacidas'] = mask_quiebra_F
         
-        # Reset de Tasas/Relaciones FB si quiebra
-        # paso5 already handles write-off in deuda_remanente_fb (sets row to 0)
-        # Pero tasas? Deberíamos resetear tasas a 0 para muertos.
-        tasas_fb[mask_quiebra_F, :] = 0.0
+        # Reset de Tasas FB para empresas que murieron
+        state['rates_FB'][state['mask_renacidas'], :] = 0.0
 
         # Registro Aggregado
         historia["t"].append(t)
         historia["DebtRank_Promedio"].append(avg_dr)
         historia["Total_Deuda_Interbancaria"].append(V_total)
-        historia["Total_Equity_Bancos"].append(np.sum(equity_bancos))
+        historia["Total_Equity_Bancos"].append(np.sum(state['banks_equity']))
         
         if total_quiebras_B > 0:
             historia["Eventos_Cascada_Size"].append(int(total_quiebras_B))
@@ -233,67 +220,48 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         if t == 100 or t == (p.T - 1):
             historia["Snapshots"][f"t_{t}"] = {
                 "DebtRank": dr_vector.copy(),
-                "Equity_Bancos": equity_bancos.copy()
+                "Equity_Bancos": state['banks_equity'].copy()
             }
             
         # --- PARQUET LOGGING ---
-        # Data Preparation
         agents = {
             "firms": pd.DataFrame({
                 "id": range(F), 
-                "liq": liquidez_empresas, 
-                "eq": equity_empresas, 
-                "prod": produccion
+                "liq": state['firms_liquidity'], 
+                "eq": state['firms_equity'], 
+                "prod": state['firms_production']
             }),
             "banks": pd.DataFrame({
                 "id": range(B), 
-                "liq": liquidez_bancos, 
-                "eq": equity_bancos,
-                "dr": dr_vector # [NEW] Saved specifically for plotting Fig 3b
+                "liq": state['banks_liquidity'], 
+                "eq": state['banks_equity'],
+                "dr": dr_vector 
             }),
             "households": pd.DataFrame({
                 "id": range(H), 
-                "dep": depositos_hogares, 
-                "bank_id": banco_principal_hogar
-            })
+                "dep": state['households_deposits'], 
+                "bank_id": state['households_bank']
+            }),
+            "globals": pd.DataFrame([{
+                "t": t,
+                "volume_ib": V_total,
+                "avg_dr": avg_dr,
+                "cascade_size": total_quiebras_B,
+                "contagion_loss": total_losses_contagion,
+                "total_eq_banks": np.sum(state['banks_equity'])
+            }])
         }
         
-        # Global Metrics (Scalars)
-        # Saved as a single-row DataFrame for consistency
-        metrics_df = pd.DataFrame([{
-            "t": t,
-            "volume_ib": V_total,
-            "avg_dr": avg_dr,
-            "cascade_size": total_quiebras_B,
-            "contagion_loss": total_losses_contagion,
-            "total_eq_banks": np.sum(equity_bancos)
-        }])
-        
-        # Add metrics to agents dict for saving (hacky but keeps signature clean)
-        # or separate category. Let's iterate `agents` as "Tabular Data"
-        agents["globals"] = metrics_df
-
-        # SRT Scatter Data (Delta EL)
-        # Only relevant for SRT mode step-analysis, but if we want to reproduce Fig 3d:
-        # We need the Delta_EL matrix.
-        if "delta_el" in debug_data:
-            # Flatten or save matrix? Matrix is better.
-            # We add it to networks/matrices list.
-            # debug_data["delta_el"] is (B,B)
-            # Pass it as a network with a special name
-            pass 
-            
-        # Construir matrices "completas" para graph
-        # Deposits HB Matrix: Sparse
+        # Matrices para grafo
         deposits_hb_matrix = np.zeros((H, B))
-        deposits_hb_matrix[np.arange(H), banco_principal_hogar] = depositos_hogares
+        deposits_hb_matrix[np.arange(H), state['households_bank']] = state['households_deposits']
         
         networks = {
-            "net_FB": pasivos_fb, # Debt
-            "net_BB": pasivos_interbancarios, # Interbank
-            "net_FH": wages_matrix_FH, # Labor Flows
-            "net_HF": consumption_matrix_HF, # Consumption Flows
-            "net_HB": deposits_hb_matrix # Deposits Stocks
+            "net_FB": state['net_FB'],
+            "net_BB": state['net_BB'],
+            "net_FH": state['labor_matrix'],
+            "net_HF": consumption_matrix_HF,
+            "net_HB": deposits_hb_matrix
         }
         
         if "delta_el" in debug_data:
