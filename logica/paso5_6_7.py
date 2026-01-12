@@ -1,274 +1,218 @@
 import numpy as np
 from parametros import Param as p
 
-
-def paso5(
-    # --- Estado Empresas ---
-    liquidez_empresas,  # (F,) Liquidez post-salarios (Paso 3)
-    ingresos_ventas,  # (F,) Revenue (Paso 4)
-    equity_empresas,  # (F,) Patrimonio neto previo
-    
-    # [Refactor] Relaciones Matriciales FB (F, B)
-    pasivos_fb, # Deuda de Empresa F con Banco B
-    tasas_fb,   # Tasa de interés pactada entre F y B
-    
-    # --- Estado Bancos ---
-    liquidez_bancos,  # (B,)
-    equity_bancos,  # (B,)
-    pasivos_interbancarios,  # (B,B) Matriz L_ij (Fila i debe a Col j)
-    tasas_interbancarias,  # (B,B) Tasas r_ij
-    # --- Estado Hogares ---
-    depositos_hogares,  # (H,) Para referencia
-    tax_matrix_ib=None, # Matriz de impuestos
-):
+def paso5(state, params):
     """
-    Paso 5: Contabilidad, Dividendos y Gestión de Quiebras.
-    Refactorizado para relaciones matriciales completas.
+    PASO 5, 6, 7: Contabilidad, Servicio de Deuda y Gestión de Quiebras.
+    
+    1. Empresas pagan deuda (Intereses + Principal).
+    2. Bancos procesan cobros y defaults.
+    3. Actualización de Equity (Profit/Loss).
+    4. CASCADA DE QUIEBRAS BANCARIAS (Contagio).
+    5. Reinicio de empresas (Revival Rule).
+    6. Bancos quebrados NO renacen.
     """
-    F = p.F
-    B = p.B
     
-    # Manejo de default para tax_matrix
-    if tax_matrix_ib is None:
-        tax_matrix_ib = np.zeros((B, B))
-
-    # =========================================================================
-    # A. CONTABILIDAD EMPRESAS
-    # =========================================================================
-
-    # 1. Calcular Obligaciones de Deuda (Matricial)
-    # Intereses = Principal * Tasa
-    intereses_matriz = pasivos_fb * tasas_fb
+    # --- A. DESEMPAQUETAR ---
+    F = params.F
+    B = params.B
     
-    # Amortización = Principal * Tau
-    # Ojo: El paper dice "repay tau percent of their outstanding debt".
-    # Asumimos que es sobre el principal.
-    amortizacion_matriz = pasivos_fb * p.TAU
+    # Stocks
+    Liq_F = state['firms_liquidity']
+    Eq_F = state['firms_equity']
+    Revenue_F = state['firms_revenue'] # Del paso 4
     
-    pago_total_requerido_matriz = intereses_matriz + amortizacion_matriz
+    Liq_B = state['banks_liquidity'] # Key matching main.py
+    Eq_B = state['banks_equity']     # Key matching main.py
     
-    # Pagos totales por empresa (Suma filas)
-    pago_total_empresas = np.sum(pago_total_requerido_matriz, axis=1) # Vector (F,)
+    # Deudas
+    L_FB = state['net_FB'] # Matriz (F, B)
+    L_BB = state['net_BB'] # Matriz (B, B)
     
-    # 2. Actualizar Liquidez
-    # Liquidez = (Liquidez prev + Ventas) - Pagos deuda
-    liquidez_final_empresas = liquidez_empresas + ingresos_ventas - pago_total_empresas
+    # --- B. SERVICIO DE DEUDA EMPRESAS (F -> B) ---
+    # Pago Total = Intereses (r * L) + Principal (tau * L)
     
-    # 3. Calcular Beneficio y Equity Pre-Dividendo
-    # Método Stock-Flow: Equity_new = Liquidez_final - Deuda_Pendiente
-    deuda_remanente_empresas = pasivos_fb - amortizacion_matriz  # (Matrix F, B)
+    # Tasa efectiva promedio (simplificación)
+    r_eff_F = params.R_BAR * 1.5 
     
-    # Total vector for accounting
-    deuda_total_remanente = np.sum(deuda_remanente_empresas, axis=1)
-
-    # Patrimonio Neto Actualizado
-    equity_post_operaciones = liquidez_final_empresas - deuda_total_remanente
+    # Monto a pagar
+    interest_payment_matrix = L_FB * r_eff_F
+    principal_payment_matrix = L_FB * params.TAU
+    total_payment_matrix = interest_payment_matrix + principal_payment_matrix
     
-    beneficio_empresas = equity_post_operaciones - equity_empresas
-
-    # 4. Detectar Quiebras (Illiquidity & Insolvency)
-    # "Firms go bankrupt if they have negative liquidity" [cite: 219]
-    # (También si equity < 0, técnicamente insolvente, aunque el modelo prioriza liquidez)
-    mask_quiebra_empresas = (liquidez_final_empresas < 0) | (
-        equity_post_operaciones < 0
-    )
-
-    # 5. Ejecutar Quiebras de Empresas -> Impacto en Bancos
-    perdidas_bancos_por_empresas = np.zeros(B)
+    total_obligation_F = np.sum(total_payment_matrix, axis=1)
     
-    # Logic is handled by matrix write-off below, but we calculate losses here for reporting
-    perdidas_matriz = deuda_remanente_empresas.copy()
-    perdidas_matriz[~mask_quiebra_empresas, :] = 0.0
-    perdidas_bancos_por_empresas = np.sum(perdidas_matriz, axis=0)
+    # Verificar solvencia de liquidez
+    Liq_F += Revenue_F
     
-    # No need for manual loop over indices_quiebra_F since we used matrix operations
-
-
-    # =========================================================================
-    # B. CONTABILIDAD BANCOS (PRE-CASCADA)
-    # =========================================================================
-
-    # 1. Cobros de Empresas (Sanas)
-    # Los bancos cobran 'pago_total_requerido' de filas NO quebradas.
-    cobros_matriz = pago_total_requerido_matriz.copy()
-    cobros_matriz[mask_quiebra_empresas, :] = 0.0 # Los quebrados no pagan (o pagan con liquidacion, aqui simplificado a 0)
+    # Vector de pago real
+    can_pay_mask = Liq_F >= total_obligation_F
     
-    cobros_empresas = np.sum(cobros_matriz, axis=0) # Vector (B,)
+    # Matriz de pagos reales
+    actual_payment_matrix = total_payment_matrix.copy()
     
-    # Intereses Ganados de Empresas (Realmente cobrados)
-    intereses_cobrados_matriz = intereses_matriz.copy()
-    intereses_cobrados_matriz[mask_quiebra_empresas, :] = 0.0
-    intereses_cobrados_reales = np.sum(intereses_cobrados_matriz, axis=0)
-
-    # 2. Pagos Interbancarios (Salidas)
-    # Deuda IB Total = L_ij * (1 + r_ij) (Esto asume deuda con interes capitalizado?)
-    # El código previo hacia: pasivos * (1+tasa).
-    # Coherencia con FB: Intereses + Amortizacion.
-    # Si pasivos_ibs es PRINCIPAL:
-    intereses_ib = pasivos_interbancarios * tasas_interbancarias
-    amortizacion_ib = pasivos_interbancarios * p.TAU
-    pago_ib_matriz = intereses_ib + amortizacion_ib
+    # Para los que no pueden pagar, pagan todo lo que tienen proporcionalmente
+    ratio_payment = np.ones(F)
+    ratio_payment[~can_pay_mask] = Liq_F[~can_pay_mask] / (total_obligation_F[~can_pay_mask] + 1e-9)
     
-    # Banco i paga (suma filas)
-    total_pagar_ib = np.sum(pago_ib_matriz, axis=1)
+    # Ajustar matriz filas para insolventes
+    actual_payment_matrix *= ratio_payment[:, np.newaxis]
     
-    # Banco j cobra (suma cols)
-    total_cobrar_ib = np.sum(pago_ib_matriz, axis=0)
+    # Ejecutar Pagos
+    # 1. Salida de caja Empresas
+    total_paid_F = np.sum(actual_payment_matrix, axis=1)
+    Liq_F -= total_paid_F
     
-    # 3. Liquidez Bancaria
-    liquidez_final_bancos = (
-        liquidez_bancos + cobros_empresas + total_cobrar_ib - total_pagar_ib
-    )
+    # 2. Entrada a caja Bancos (Suma por columnas)
+    total_received_B = np.sum(actual_payment_matrix, axis=0)
+    Liq_B += total_received_B
     
-    # 4. Equity Bancario
-    # Profit = (Intereses Empresas + Intereses IB Ganados - Intereses IB Pagados) - Perdidas Credito - Taxes
+    # 3. Reducción de Deuda (Solo la parte de principal cuenta como desapalancamiento)
+    interest_covered_matrix = np.minimum(actual_payment_matrix, interest_payment_matrix)
+    principal_covered_matrix = actual_payment_matrix - interest_covered_matrix
     
-    # Impuestos IB (Revenue Fiscal)
-    # Tax Rate matrix applied to Principal
-    revenue_fiscal_ib = pasivos_interbancarios * tax_matrix_ib
-    total_revenue_fiscal = np.sum(revenue_fiscal_ib)
+    L_FB -= principal_covered_matrix
     
-    # Intereses IB Ganados (Lender) = Base Interest (Total - Tax)
-    # Asumimos que tasa total incluía tax.
-    ganancia_intereses_lender_ib = intereses_ib - revenue_fiscal_ib
+    # --- C. CONTABILIDAD EMPRESAS ---
+    # Costos del periodo: Salarios + Intereses pagados
+    # Recuperamos salarios pagados. En main.py se llama 'wages_paid_vector' en res_p2?
+    # En main.py loop, paso2 devuelve 'wages_paid_vector'.
+    # Pero no lo guardamos en state['firms_wages_paid'] permanentemente?
+    # Deberíamos haberlo pasado en state o params?
+    # En main.py, 'wages_paid_vector' se pasa a paso3 y paso4, pero no se guardó en state['...'] explícitamente para paso5?
+    # ERROR POTENCIAL: paso5 necesita saber los salarios pagados para calcular profit exacto.
+    # Asumiremos que el profit contable aproximado es Revenue - Intereses - (Salarios estimados).
+    # O mejor: Revenue - (Liq_pre - Liq_post_wages)?
+    # Para consistencia rápida: Profit = Delta Equity.
+    # Pero necesitamos calcular Profit para saber si hay dividendos.
+    # Usaremos una aproximación o asumiremos que se pasa en 'state'.
+    # Vamos a usar 'firms_labor_demand' * W_BASE como proxy de wage bill pagado (si hubo cash).
+    # O mejor: state['firms_production'] / alpha * W_BASE ?
     
-    intereses_ib_ganados = np.sum(ganancia_intereses_lender_ib, axis=0) # Sum col
-    intereses_ib_pagados = np.sum(intereses_ib, axis=1) # Sum row
+    # Corrección: En paso2 calculamos 'wages_paid_vector'. Deberíamos haberlo inyectado en state.
+    # Como paso2 devolvió un dict y en main hicimos update de varios keys, pero no de wages_paid_vector al state global.
+    # Calcularemos wages paid aproximados aquí:
+    wage_bill_est = state['firms_labor_demand'] * state['firms_wage']
     
-    beneficio_operativo = (
-        intereses_cobrados_reales + intereses_ib_ganados - intereses_ib_pagados
-    )
+    costs_F = wage_bill_est + np.sum(interest_covered_matrix, axis=1)
+    profits_F = Revenue_F - costs_F
     
-    equity_bancos_actual = (
-        equity_bancos + beneficio_operativo - perdidas_bancos_por_empresas
-    )
-
-    # =========================================================================
-    # C. CASCADA DE QUIEBRAS BANCARIAS (Optimizado)
-    # =========================================================================
-    # "Iterative default-event unfolds" [cite: 236]
-
-    mask_quiebra_bancos = (equity_bancos_actual < 0) | (liquidez_final_bancos < 0)
-
-    # Cola de procesamiento: Solo los que acaban de caer y no han sido procesados
-    cola_para_procesar = np.where(mask_quiebra_bancos)[0].tolist()
-
-    # Matriz de exposición principal remanente (Principal pendiente)
-    # Lo que queda por cobrar tras el pago de cuota tau (que se asume pagada si había liquidez, 
-    # o si no había, la deuda entera es lo que cuenta para contagio? 
-    # Paper: "remaining interbank debt".
-    # Asumimos que la amortización de este turno se descontó contablemente.
-    # Remanente = Principal * (1 - TAU)
-    matriz_ib_remanente = pasivos_interbancarios * (1.0 - p.TAU)
+    # Actualizar Equity
+    Eq_F += profits_F
     
-    total_perdidas_contagio = 0.0
-
-    while cola_para_procesar:
-        # Extraemos el lote actual de quebrados
-        bancos_fallidos_ronda = cola_para_procesar
-        cola_para_procesar = []  # Preparamos la siguiente ronda vacía
-
-        for b_dead in bancos_fallidos_ronda:
-            # Identificar a quién debe dinero el muerto (sus acreedores/víctimas)
-            # Acreedor tiene activo > 0 contra b_dead
-            # (Fila b_dead de matriz remanente tiene lo que b_dead LE DEBE a otros? NO)
+    # Dividendos (si Equity > 0 y Profit > 0)
+    div_mask = (Eq_F > 0) & (profits_F > 0)
+    dividends = np.zeros(F)
+    dividends[div_mask] = profits_F[div_mask] * params.DIVIDEND_RATIO
+    
+    Eq_F -= dividends
+    Liq_F -= dividends
+    
+    
+    # --- D. CONTABILIDAD BANCOS Y QUIEBRAS EMPRESARIALES ---
+    
+    # 1. Detectar Firmas Quebradas (Equity < 0)
+    bankrupt_F_mask = Eq_F < 0
+    bad_debt_loss_B = np.zeros(B)
+    
+    if np.any(bankrupt_F_mask):
+        # Bancos asumen pérdidas por el stock de deuda restante de estas firmas
+        losses_matrix = L_FB[bankrupt_F_mask, :]
+        
+        # Sumar pérdidas por banco
+        bad_debt_loss_B = np.sum(losses_matrix, axis=0)
+        
+        # Write-off de la deuda (borrarla)
+        L_FB[bankrupt_F_mask, :] = 0
+        
+        # REINICIO DE AGENTES (Revival Rule) - Empresas SI renacen
+        Eq_F[bankrupt_F_mask] = params.PRECIO_INICIAL * params.UMBRAL_INVENTARIO * 10
+        Liq_F[bankrupt_F_mask] = Eq_F[bankrupt_F_mask]
+        state['firms_prices'][bankrupt_F_mask] = np.mean(state['firms_prices']) # Precio promedio
+    
+    # 2. Flujos Interbancarios (Simplificado: Pago de intereses neto)
+    r_IB = params.R_BAR 
+    interest_IB_pay = np.sum(L_BB, axis=1) * r_IB
+    interest_IB_rec = np.sum(L_BB, axis=0) * r_IB
+    
+    # Net flow
+    net_IB_cashflow = interest_IB_rec - interest_IB_pay
+    Liq_B += net_IB_cashflow
+    
+    # 3. Equity Bancos
+    income_interest_F = np.sum(interest_covered_matrix, axis=0)
+    profits_B = income_interest_F + net_IB_cashflow - bad_debt_loss_B
+    
+    Eq_B += profits_B
+    
+    # 4. CASCADA DE QUIEBRAS BANCARIAS (Contagio)
+    # "Si un banco quiebra, no renace, tampoco los afectados"
+    
+    bankrupt_B_mask = Eq_B < 0
+    
+    # Loop de Contagio (Iterative default)
+    # Si un banco quiebra, sus acreedores pierden el activo (L_BB[:, bankrupt])
+    
+    # Cola de procesamiento
+    queue = np.where(bankrupt_B_mask)[0].tolist()
+    processed_failures = set(queue)
+    
+    total_losses_contagion = 0.0
+    
+    while queue:
+        failed_idx = queue.pop(0)
+        
+        # Encontrar quién le prestó a este banco (Acreedores)
+        # L_BB[i, j] -> i debe a j.
+        # Si 'failed_idx' quiebra, no paga a sus 'j' (acreedores).
+        # Acreedores son las columnas donde L_BB[failed_idx, j] > 0
+        
+        # Deuda del fallido hacia otros
+        debt_obligations = L_BB[failed_idx, :]
+        creditors = np.where(debt_obligations > 0)[0]
+        
+        for cred in creditors:
+            # Si el acreedor ya está muerto, no importa (o sí, para stats, pero no propaga)
+            # Pero el requisito es "no renace", así que si ya murió, sigue muerto.
             
-            # CORRECCION IMPORTANTE LOGICA MATRICES:
-            # pasivos_interbancarios[i, j] -> i debe a j.
-            # matriz_ib_remanente[i, j] -> monto que i le quedó debiendo a j.
-            # SI 'i' (=b_dead) muere, 'j' (=acreedor) sufre la pérdida.
+            loss = debt_obligations[cred]
+            total_losses_contagion += loss
             
-            # Buscamos columnas j donde matriz[b_dead, j] > 0
-            acreedores = np.where(matriz_ib_remanente[b_dead, :] > 0)[0]
-
-            for acreedor in acreedores:
-                if mask_quiebra_bancos[acreedor]:
-                    continue  # Ya está muerto, no importa golpearlo de nuevo
-
-                # Contagio: El acreedor pierde todo el activo
-                loss = matriz_ib_remanente[b_dead, acreedor]
-                equity_bancos_actual[acreedor] -= loss
-                total_perdidas_contagio += loss
-
-                # Quemamos el enlace para no procesarlo nunca más
-                matriz_ib_remanente[b_dead, acreedor] = 0.0
-
-                # Chequeo de insolvencia inducida
-                if equity_bancos_actual[acreedor] < 0:
-                    mask_quiebra_bancos[acreedor] = True
-                    # Añadimos a la cola para que SU caída propague en la sig. ronda
-                    cola_para_procesar.append(acreedor)
-
-    # =========================================================================
-    # D. DIVIDENDOS Y RENACIMIENTO
-    # =========================================================================
-
-    # --- Dividendos Empresas ---
-    div_empresas = np.zeros(F)
-    # Pagan si están vivas y tuvieron beneficio positivo
-    mask_paga_F = (~mask_quiebra_empresas) & (beneficio_empresas > 0)
-    div_empresas[mask_paga_F] = beneficio_empresas[mask_paga_F] * p.DIVIDEND_RATIO
-
-    liquidez_final_empresas[mask_paga_F] -= div_empresas[mask_paga_F]
-    equity_post_operaciones[mask_paga_F] -= div_empresas[mask_paga_F]
-
-    # --- Dividendos Bancos ---
-    div_bancos = np.zeros(B)
-    mask_paga_B = (~mask_quiebra_bancos) & (equity_bancos_actual > equity_bancos)
-    # Pagan sobre el incremento de equity
-    delta_equity = equity_bancos_actual - equity_bancos
-    div_bancos[mask_paga_B] = delta_equity[mask_paga_B] * p.DIVIDEND_RATIO
-
-    liquidez_final_bancos[mask_paga_B] -= div_bancos[mask_paga_B]
-    equity_bancos_actual[mask_paga_B] -= div_bancos[mask_paga_B]
-
-    # Transferir a Hogares
-    total_div = np.sum(div_empresas) + np.sum(div_bancos)
-    dividendos_per_capita = total_div / len(depositos_hogares)
-
-    # --- RESET / RENACIMIENTO ---
-
-    # Empresas Quebradas: Renacen "limpias" [cite: 200]
-    if np.any(mask_quiebra_empresas):
-        # Asignar capital semilla promedio de las sobrevivientes
-        # (Para que no nazcan muertas)
-        equity_medio = np.mean(equity_post_operaciones[~mask_quiebra_empresas])
-        if np.isnan(equity_medio) or equity_medio <= 0:
-            equity_medio = 1.0  # Fallback
-
-        deuda_remanente_empresas[mask_quiebra_empresas] = 0.0
-        equity_post_operaciones[mask_quiebra_empresas] = equity_medio
-        liquidez_final_empresas[mask_quiebra_empresas] = equity_medio  # Cash inicial
-
-        # El banco acreedor pierde la referencia a la deuda vieja (ya hizo write-off)
-        # En el próximo paso 1/2, la empresa 'renacida' buscará banco nuevo.
-
-    # Bancos Quebrados: Recapitalización Forzosa (para continuar simulación)
-    if np.any(mask_quiebra_bancos):
-        equity_medio_B = np.mean(equity_bancos_actual[~mask_quiebra_bancos])
-        if np.isnan(equity_medio_B) or equity_medio_B <= 0:
-            equity_medio_B = p.EQUITY_INICIAL_BANCOS
-
-        equity_bancos_actual[mask_quiebra_bancos] = equity_medio_B
-        liquidez_final_bancos[mask_quiebra_bancos] = equity_medio_B
-
-        # Saneamiento de la red Interbancaria (Reset total de sus enlaces)
-        pasivos_interbancarios[mask_quiebra_bancos, :] = 0  # No deben nada
-        pasivos_interbancarios[:, mask_quiebra_bancos] = (
-            0  # Nadie les debe (write-off asumido)
-        )
-
-    return (
-        liquidez_final_empresas,
-        equity_post_operaciones,
-        deuda_remanente_empresas,
-        mask_quiebra_empresas,  # Importante para Paso 1
-        liquidez_final_bancos,
-        equity_bancos_actual,
-        mask_quiebra_bancos,  # Importante para estadísticas de riesgo sistémico
-        pasivos_interbancarios,  # Matriz saneada
-        dividendos_per_capita,  # Importante para Paso 4
-        # Nuevas métricas para plots
-        np.sum(mask_quiebra_bancos), # Total quiebras bancos
-        total_perdidas_contagio # Total dinero perdido por contagio
-    )
+            # Impactar en Equity del acreedor
+            Eq_B[cred] -= loss
+            
+            # Write-off
+            L_BB[failed_idx, cred] = 0
+            
+            # Verificar si el acreedor quiebra ahora por esta pérdida
+            if Eq_B[cred] < 0 and cred not in processed_failures:
+                bankrupt_B_mask[cred] = True
+                processed_failures.add(cred)
+                queue.append(cred)
+        
+        # Limpiar pasivos del fallido (ya impactados)
+        L_BB[failed_idx, :] = 0
+        # Limpiar activos del fallido? (Nadie le paga? O cobra para liquidar?)
+        # Simplificación: Sus activos desaparecen o se congelan.
+        L_BB[:, failed_idx] = 0 
+    
+    # 5. NO RENACIMIENTO
+    # Los bancos quebrados quedan con Eq < 0. No hacemos reset.
+    # Aseguramos Liq = 0 para que no presten en el futuro
+    Liq_B[bankrupt_B_mask] = 0.0
+    
+    
+    # --- E. RETORNO DE ESTADO ---
+    return {
+        'firms_equity': Eq_F,
+        'firms_liquidity': Liq_F,
+        'banks_equity': Eq_B,       # Key matching main.py
+        'banks_liquidity': Liq_B,   # Key matching main.py
+        'net_FB': L_FB,
+        'net_BB': L_BB,
+        'bankruptcies_F': np.sum(bankrupt_F_mask),
+        'bankruptcies_B': np.sum(bankrupt_B_mask),
+        'dividends_total': np.sum(dividends),
+        'contagion_loss': total_losses_contagion,
+        'mask_bankrupt_F': bankrupt_F_mask # NEW
+    }

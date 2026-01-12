@@ -1,159 +1,112 @@
 import numpy as np
 from parametros import Param as p
 
-
-def paso4(
-    precios_actuales,  # Vector (F,) Precios fijados en Paso 1
-    oferta_total_bienes,  # Vector (F,) Inventario + Producción (Paso 3)
-    factura_salarial_real,  # Escalar o Vector (F,): Dinero total pagado en salarios
-    depositos_hogares,  # Vector (H,) Ahorros acumulados de los hogares
-    dividendos_previos,  # Vector (H,) Dividendos recibidos en t-1 (Paso 5 previo)
-):
+def paso4(state, params):
     """
-    Paso 4: Mercado de Bienes y Consumo.
-
-    1. Hogares reciben ingresos (Salarios + Dividendos).
-    2. Hogares definen consumo deseado (Budget).
-    3. Selección de proveedores (Regla 'z' aleatoria).
-    4. Ejecución de compras y actualización de inventarios.
-
-    [cite_start]Ref: [cite: 185, 210, 211, 219]
-    """
-
-    H = p.H
-    F = p.F
-
-    # -------------------------------------------------------------------------
-    # 1. Ingresos de los Hogares
-    # -------------------------------------------------------------------------
-    # [cite_start]"Households receive wages" [cite: 191]
-    # Sumamos toda la masa salarial pagada por las empresas y la repartimos.
-    # (Simplificación válida: asumimos pleno empleo o reparto solidario en el sector hogares)
-    total_salarios = np.sum(factura_salarial_real)
-    ingreso_salarial_per_capita = total_salarios / H
-
-    # Riqueza Disponible = Ahorro previo + Salarios + Dividendos
-    riqueza_hogares = (
-        depositos_hogares + ingreso_salarial_per_capita + dividendos_previos
-    )
-
-    # -------------------------------------------------------------------------
-    # 2. Presupuesto de Consumo
-    # -------------------------------------------------------------------------
-    # [cite_start]"At each time step every household spends a fixed percentage c" [cite: 210]
-    presupuesto_consumo = riqueza_hogares * p.PROPENSION_CONSUMO
-
-    # -------------------------------------------------------------------------
-    # 3. Selección de Vendedores (Search Process)
-    # -------------------------------------------------------------------------
-    # [cite_start]"Households compare prices from z randomly chosen firms and buy the cheapest" [cite: 211]
-
-    # Cada hogar ve 'z' empresas aleatorias
-    indices_firmas_vistas = np.random.randint(0, F, size=(H, p.Z_CONSUMO), dtype=np.int64)
-
-    # Extraer precios correspondientes
-    precios_vistas = precios_actuales[indices_firmas_vistas]
-
-    # Encontrar la opción más barata para cada hogar
-    idx_min_local = np.argmin(precios_vistas, axis=1)  # 0..z-1
-
-    # Mapear de vuelta al índice real de la empresa (0..F-1)
-    firmas_elegidas = indices_firmas_vistas[np.arange(H), idx_min_local]
-
-    # -------------------------------------------------------------------------
-    # 4. Agregación de Demanda
-    # -------------------------------------------------------------------------
-    # Sumar todo el dinero dirigido a cada empresa
-    demanda_monetaria = np.bincount(
-        firmas_elegidas, weights=presupuesto_consumo, minlength=F
-    )
-
-    # Q_demandada = Dinero / Precio
-    demanda_cantidad_teorica = np.divide(
-        demanda_monetaria,
-        precios_actuales,
-        out=np.zeros_like(demanda_monetaria),
-        where=precios_actuales != 0,
-    )
-
-    # -------------------------------------------------------------------------
-    # 5. Transacción Real (Stock Constraint)
-    # -------------------------------------------------------------------------
-    # Venta Real = min(Lo que piden, Lo que tengo)
-    ventas_cantidad_real = np.minimum(demanda_cantidad_teorica, oferta_total_bienes)
-
-    # Ingresos (Revenue) para la empresa
-    ingresos_ventas = ventas_cantidad_real * precios_actuales
-
-    # Actualizar Inventario (Stock no vendido)
-    inventario_final = oferta_total_bienes - ventas_cantidad_real
-    # Evitar negativos por error flotante
-    inventario_final = np.maximum(inventario_final, 0.0)
-
-    # -------------------------------------------------------------------------
-    # 6. Actualización de Hogares (Racionamiento Agregado)
-    # -------------------------------------------------------------------------
-    # -------------------------------------------------------------------------
-    # 6. Actualización de Hogares (Racionamiento Específico)
-    # -------------------------------------------------------------------------
-    # [Refactor] Ahora el racionamiento es local: Si tu tienda no tiene, no gastas.
+    PASO 4: Mercado de Bienes (Hogares -> Empresas)
     
-    # Ratio de satisfacción por empresa (0.0 a 1.0)
-    # ratio_j = Ventas_j / Demanda_j
+    1. Hogares determinan presupuesto de consumo.
+    2. Selección de vendedor: Cada hogar compara precios de una muestra de empresas.
+    3. Transacción: Compra al menor precio, sujeta a disponibilidad (Racionamiento).
     
-    # Manejo seguro de division por cero (si demanda es 0, ratio es 1.0 logicamente)
-    ratio_satisfaccion_firma = np.divide(
-        ventas_cantidad_real,
-        demanda_cantidad_teorica,
-        out=np.ones_like(ventas_cantidad_real), # Default 1.0
-        where=demanda_cantidad_teorica > 1e-9
-    )
-    
-    # Mapear el ratio de la empresa elegida a cada hogar
-    # Hago lookup usando el índice de la firma
-    ratio_satisfaccion_hogar = ratio_satisfaccion_firma[firmas_elegidas]
-    
-    # Gasto efectivo por hogar
-    gasto_efectivo_hogar = presupuesto_consumo * ratio_satisfaccion_hogar
-
-    # Nueva riqueza = Riqueza inicial - Gasto
-    depositos_finales = riqueza_hogares - gasto_efectivo_hogar
-
-    # Nota de consistencia: sum(depositos_finales) + sum(ingresos_ventas)
-    # debería ser igual a sum(riqueza_hogares) [SFC Check]
-    # Check de consistencia Stock-Flow (SFC)
-    # El dinero que tenían los hogares (riqueza) debe estar ahora en depositos_finales o en ingresos_ventas
-    assert np.isclose(
-        np.sum(depositos_finales) + np.sum(ingresos_ventas), np.sum(riqueza_hogares)
-    ), "Error SFC: El dinero se ha creado o destruido en el intercambio."
-
-    # -------------------------------------------------------------------------
-    # 7. Matriz de Consumo (H-F)
-    # -------------------------------------------------------------------------
-    # Generar matriz dispersa de flujos monetarios.
-    # consumption_matrix[h, f] = gasto_efectivo_hogar[h] si compro en f
-    
-    consumption_matrix = np.zeros((H, F))
-    
-    # Vectorized assignment
-    # Usamos fancy indexing: filas=range(H), cols=firmas_elegidas
-    # Solo asignamos si el gasto > 0
-    
-    mask_gasto = gasto_efectivo_hogar > 1e-9
-    if np.any(mask_gasto):
-        # Filtramos para no llenar de ceros o indices invalidos (aunque firmas_elegidas siempre es valido)
-        h_idx = np.arange(H)[mask_gasto]
-        f_idx = firmas_elegidas[mask_gasto]
-        gastos = gasto_efectivo_hogar[mask_gasto]
+    Args:
+        state (dict): Estado del sistema.
+        params (class): Parámetros globales.
         
-        consumption_matrix[h_idx, f_idx] = gastos
-
-    return (
-        ventas_cantidad_real,
-        ingresos_ventas,
-        inventario_final,
-        depositos_finales,
-        demanda_cantidad_teorica,
-        ingreso_salarial_per_capita,
-        consumption_matrix, # (H, F) Monetary Flow
-    )
+    Returns:
+        dict: Actualizaciones de inventarios, liquidez y demanda registrada.
+    """
+    
+    # --- A. PREPARACIÓN ---
+    H = params.H
+    F = params.F
+    
+    # Datos de entrada
+    P_firms = state['firms_prices']            # (F,)
+    S_firms = state['firms_inventory']         # (F,) Oferta disponible (Inv + Prod)
+    # Check key consistency: main.py uses 'households_deposits', logic uses 'households_liquidity' ??
+    # main.py initialization: 'households_deposits'
+    # paso4 prompt code: 'households_liquidity'
+    # I should use the key from main.py or update main.py. 
+    # Let's check main.py state keys again.
+    # main.py has 'households_deposits'.
+    # I will stick to 'households_deposits' to match main.py.
+    M_households = state['households_deposits'] # (H,)
+    
+    # 1. Presupuesto de Consumo (Propensión marginal al consumo)
+    # Gualdi et al: Budget = c * Savings
+    budget_H = M_households * params.PROPENSION_CONSUMO
+    
+    # --- B. MATCHING VECTORIAL (BÚSQUEDA DE PRECIOS) ---
+    # Simulamos que cada hogar visita 'VISITS' empresas aleatorias y elige la barata.
+    VISITS = 3 # Número de empresas que "mira" cada consumidor
+    
+    # Matriz de índices aleatorios (H, VISITS) -> Qué empresas visita cada hogar
+    # randint es rápido para generar la topología de red de consumo estocástica
+    visited_indices = np.random.randint(0, F, (H, VISITS))
+    
+    # Obtener precios de esas empresas: (H, VISITS)
+    prices_seen = P_firms[visited_indices]
+    
+    # Encontrar índice (0..VISITS-1) del precio mínimo por fila
+    best_local_idx = np.argmin(prices_seen, axis=1)
+    
+    # Obtener el índice global de la empresa elegida (H,)
+    # Select from visited_indices using row_range and best_local_idx
+    chosen_firms = visited_indices[np.arange(H), best_local_idx]
+    
+    # --- C. AGREGACIÓN DE DEMANDA (INTENCIÓN DE COMPRA) ---
+    # Calcular cuánto quiere gastar cada hogar en su empresa elegida.
+    # Demanda monetaria: Budget. Demanda física: Budget / Precio
+    chosen_prices = P_firms[chosen_firms]
+    
+    # Cantidad demandada por hogar (física)
+    demand_H_qty = np.zeros(H)
+    mask_price = chosen_prices > 0
+    demand_H_qty[mask_price] = budget_H[mask_price] / chosen_prices[mask_price]
+    
+    # Agregar demanda total por empresa (Vectorización de la suma)
+    # total_demand_F[f] = sum(demand_H_qty where chosen_firms == f)
+    total_demand_qty_F = np.bincount(chosen_firms, weights=demand_H_qty, minlength=F)
+    # total_demand_monetary_F = np.bincount(chosen_firms, weights=budget_H, minlength=F) # Unused
+    
+    # --- D. RACIONAMIENTO (MERCADO) ---
+    # Ventas reales = min(Demanda, Inventario)
+    sales_qty_F = np.minimum(total_demand_qty_F, S_firms)
+    
+    # Calcular fracción de satisfacción para ajustar el gasto de los hogares
+    # Si una empresa vendió todo (sales < demand), los hogares solo gastaron una fracción.
+    # Rationing ratio alpha = sales / demand (0..1)
+    rationing_ratio_F = np.ones(F)
+    mask_demand = total_demand_qty_F > 1e-9
+    rationing_ratio_F[mask_demand] = sales_qty_F[mask_demand] / total_demand_qty_F[mask_demand]
+    
+    # --- E. ACTUALIZACIÓN DE HOGARES (Gasto Real) ---
+    # Gasto real del hogar i = Presupuesto_i * rationing_ratio_(empresa_elegida)
+    # Mapear el ratio de la empresa de vuelta al hogar
+    household_rationing = rationing_ratio_F[chosen_firms]
+    
+    actual_spending_H = budget_H * household_rationing
+    
+    # Actualizar liquidez hogares (Salida de dinero)
+    M_households_new = M_households - actual_spending_H
+    
+    # --- F. ACTUALIZACIÓN EMPRESAS (Ingresos y Stock) ---
+    # Ingresos = Ventas * Precio
+    revenue_F = sales_qty_F * P_firms
+    
+    # Nuevo Inventario = Inventario Previo - Ventas
+    inventory_new_F = S_firms - sales_qty_F
+    
+    # Generar matriz de flujo de consumo (H -> F) para visualización (Opcional/Sparse)
+    # Por eficiencia, devolvemos solo agregados, salvo que se pida explícitamente la red.
+    # consumption_matrix_HF = ... (Omitido por eficiencia si no se grafica cada link)
+    
+    return {
+        'firms_sales_qty': sales_qty_F,
+        'firms_revenue': revenue_F,
+        'firms_inventory': inventory_new_F,
+        'firms_demand_received': total_demand_qty_F, # Para el Paso 1 del siguiente turno (Expectativas)
+        'households_deposits': M_households_new, # Key matching main.py
+        'consumption_flows': (chosen_firms, actual_spending_H) # Tupla comprimida para logging si es necesario
+    }

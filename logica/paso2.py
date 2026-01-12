@@ -1,354 +1,235 @@
 import numpy as np
 from parametros import Param as p
 
-
-def paso2(
-    demanda_credito,  # Vector (F,) Demanda monetaria de empresas
-    liquidez_bancos,  # Vector (B,) Liquidez actual
-    equity_bancos,  # Vector (B,) Capital
-    pasivos_interbancarios,  # Matriz (B, B) - Filas: Deudor (Borrower), Col: Prestamista (Lender)
-    equity_empresas,  # Vector (F,)
-    deuda_empresas,  # Vector (F,)
-    modo_impuesto="NINGUNO",  # "NINGUNO", "TOBIN", "SRT"
-):
+def calcular_debtrank_vector(L, equity_banks, W_initial=None):
     """
-    Paso 2: Mercado de Crédito y Formación de Red Interbancaria.
-
-    1. Calcula fragilidad financiera.
-    2. Establece tasas interbancarias (incluyendo Impuestos SRT/Tobin).
-    3. Subasta de crédito Empresas-Bancos y ejecución de préstamos.
-
-    Ref: [cite: 183, 221, 652]
+    Calcula el DebtRank de todos los bancos vectorialmente.
+    Ref: Battiston et al. (2012) & Poledna et al. (2016) Eq. D1-D5
+    
+    Args:
+        L (matrix): Matriz de Pasivos Interbancarios (B, B). L[i, j] es lo que i debe a j.
+        equity_banks (vector): Capital de los bancos (B,).
+    
+    Returns:
+        R (vector): DebtRank de cada banco (impacto sistémico).
     """
-    F = p.F
-    B = p.B
-
-    # -------------------------------------------------------------------------
-    # 1. Fragilidad Financiera y Solvencia (Creditworthiness)
-    # -------------------------------------------------------------------------
-    # Empresas: mu = tanh(Leverage) [cite: 629]
-    # Evitamos división por cero con np.divide y where
-    lev_empresas = np.divide(
-        deuda_empresas,
-        equity_empresas,
-        out=np.zeros_like(deuda_empresas),
-        where=equity_empresas != 0,
-    )
-    mu_empresas = np.tanh(lev_empresas)
-
-    # Bancos: mu = tanh(Leverage) [cite: 648]
-    # L_ij: Banco i debe a Banco j.
-    total_pasivos_bancos = np.sum(
-        pasivos_interbancarios, axis=1
-    )  # Suma filas (lo que debe i)
-    lev_bancos = np.divide(
-        total_pasivos_bancos,
-        equity_bancos,
-        out=np.zeros_like(total_pasivos_bancos),
-        where=equity_bancos != 0,
-    )
-    mu_bancos = np.tanh(lev_bancos)
-
-    # Factores idiosincráticos (Aleatoriedad operativa) [cite: 628, 647]
-    chi = np.random.uniform(0, 1, B)  # Especificidad banco (Mercado Empresas)
+    B = len(equity_banks)
     
-    # Especificidad banco (Mercado Interbancario)
-    # Refactorizado de hardcode 0.1 a parametro RANGO_PSI
-    psi = np.random.uniform(0, p.RANGO_PSI, B)  
-
-    # -------------------------------------------------------------------------
-    # 2. Ofertas Mercado Interbancario (Cálculo Matricial)
-    # -------------------------------------------------------------------------
-    # Tasa que Banco 'j' (Lender) ofrece a Banco 'i' (Borrower)
-    # r_ji = r_bar * (1 + psi_j * mu_i) [cite: 645]
-    # Matriz (B, B): Filas=Borrower (i), Cols=Lender (j)
-
-    # Broadcast: mu_bancos (B,1) vs psi (1,B)
-    r_ib_base = p.R_BAR * (1 + mu_bancos[:, None] * psi[None, :])
-
-    # --- CÁLCULO DE IMPUESTOS ---
-    tax_matrix = np.zeros((B, B))
-    metadata_debug = {}
-
-    if modo_impuesto == "TOBIN":
-        # Tasa plana sobre la transacción (aprox como spread) [cite: 250, 673]
-        # Refactorizado hardcode 0.002 -> p.TASA_TOBIN (Eq. A6)
-        tax_matrix[:, :] = p.TASA_TOBIN
-
-    elif modo_impuesto == "SRT":
-        # Calcular contribución marginal al riesgo sistémico para cada par posible
-        # Usamos el leverage como proxy de probabilidad de default p_i [cite: 663]
-        # Refactorizado hardcode 0.01 -> p.FACTOR_PROB_DEFAULT 
-        probs_default = p.FACTOR_PROB_DEFAULT * mu_bancos  # Proxy definido en Eq A4
-
-        tax_matrix, delta_el_matrix = calcular_matriz_srt(
-            pasivos_interbancarios,
-            equity_bancos,
-            probs_default,
-            p.ZETA,  # Sensibilidad del impuesto (ej. 0.02 o 1.0)
-        )
-        metadata_debug["delta_el"] = delta_el_matrix
-
-    # Tasas Interbancarias Totales [cite: 670]
-    r_ib_total = r_ib_base + tax_matrix
-
-    # Determinar mejor prestamista potencial para cada banco (si necesitara fondos)
-    # Diagonal infinita (no prestarse a sí mismo)
-    np.fill_diagonal(r_ib_total, np.inf)
-
-    # [FIX] Break ties randomly (At t=0 all rates are equal, causing everyone to target Bank 0)
-    noise = np.random.uniform(0, 1e-9, (B, B))
+    # 1. Matriz de Impacto W_ij (Eq. D1)
+    # W_ij = min(1, L_ij / C_j) -> Impacto de i en j si i quiebra
+    # Evitar división por cero
+    C_j_inv = np.zeros_like(equity_banks)
+    mask_c = equity_banks > 0
+    C_j_inv[mask_c] = 1.0 / equity_banks[mask_c]
     
-    # Cada fila 'i' busca el mínimo en columnas 'j'
-    mejores_lenders_idx = np.argmin(r_ib_total + noise, axis=1)  # Vector (B,)
-    costos_refinanciacion = r_ib_total[np.arange(B), mejores_lenders_idx]
-
-    # -------------------------------------------------------------------------
-    # 3. Subasta de Crédito a Empresas
-    # -------------------------------------------------------------------------
-    # Empresas contactan 'n' bancos aleatorios [cite: 216]
-    bancos_contactados = np.random.randint(0, B, size=(F, p.N_BANCOS_CONTACTADOS))
-
-    # Matriz de ofertas: (F, N_contactados)
-    ofertas_tasas = np.zeros((F, p.N_BANCOS_CONTACTADOS))
-
-    for k in range(p.N_BANCOS_CONTACTADOS):
-        b_indices = bancos_contactados[:, k]
-
-        # Tasa base para empresa f del banco b [cite: 626]
-        r_base = p.R_BAR * (1 + chi[b_indices] * mu_empresas)
-
-        # Spread de refinanciación [cite: 652]
-        # Si Banco necesita fondos (Demanda > Liquidez), añade costo interbancario.
-        # Aproximación ABM: El banco evalúa la demanda de ESTA empresa vs su liquidez total.
-
-        liquidez_disp = liquidez_bancos[b_indices]
-        demanda_f = demanda_credito
-
-        # Déficit positivo solo si demanda > liquidez
-        deficit = np.maximum(demanda_f - liquidez_disp, 0)
-
-        # Ratio del préstamo que debe ser refinanciado
-        ratio = np.divide(
-            deficit, demanda_f, out=np.zeros_like(deficit), where=demanda_f != 0
-        )
-
-        # Sumar costo interbancario (incluyendo tax) ponderado
-        costo_ib = costos_refinanciacion[b_indices]
-        ofertas_tasas[:, k] = r_base + (ratio * costo_ib)
-
-    # -------------------------------------------------------------------------
-    # 4. Selección y Racionamiento
-    # -------------------------------------------------------------------------
-    # Elegir banco con tasa mínima [cite: 216]
-    idx_min = np.argmin(ofertas_tasas, axis=1)
-
-    tasas_finales = ofertas_tasas[np.arange(F), idx_min]
-    bancos_elegidos = bancos_contactados[np.arange(F), idx_min]
-
-    # Racionamiento de crédito [cite: 217]
-    # Si tasa > r_max, empresa pide menos (phi * demanda)
-    mask_racionado = tasas_finales > p.R_MAX
-    monto_solicitado = demanda_credito.copy()
-    monto_solicitado[mask_racionado] *= p.PHI  # ej. 0.8
-
-    # -------------------------------------------------------------------------
-    # 5. Ejecución de Préstamos (Secuencial)
-    # -------------------------------------------------------------------------
-    # -------------------------------------------------------------------------
-    # 5. Ejecución de Préstamos (Secuencial)
-    # -------------------------------------------------------------------------
-    # Matriz de Nuevos Préstamos: (F, B)
-    # Filas: Empresas, Columnas: Bancos
-    nuevos_prestamos_matrix = np.zeros((F, B))
+    # Broadcasting: L es (i, j), C_j es (j,)
+    # W[i, j] = L[i, j] / Equity[j]
+    W = np.minimum(1.0, L * C_j_inv[np.newaxis, :])
     
-    nueva_matriz_ib = pasivos_interbancarios.copy()
-    liquidez_actual = liquidez_bancos.copy()
+    # 2. Valor Económico v_i (Eq. D2: Proxy = Total Liabilities Interbank)
+    # v_i = sum_j(L_ji) / sum(L) -> Cuánto debe i al sistema (Incoming loans)
+    # Ojo: L[i,j] es lo que i debe a j. Total pasivos de i es sum(L[i, :])
+    # Paper usa L_i = sum_j L_ji (activos prestados por otros a i) para importancia.
+    L_i = np.sum(L, axis=1) 
+    total_L = np.sum(L)
+    if total_L > 0:
+        v = L_i / total_L
+    else:
+        v = np.ones(B) / B
 
-    # Aleatorizar orden de ejecución para no favorecer a index 0
-    orden = np.random.permutation(F)
-    
-    # Tolerancia numérica para float comparisons
-    EPSILON = 1e-9
-
-    for f in orden:
-        monto = monto_solicitado[f]
-        # Optimization: Skip negligible loan requests
-        if monto <= 1e-6:
-            continue
-
-        b = bancos_elegidos[f]
-
-        # Caso 1: Tiene liquidez propia
-        # Usamos EPSILON para robustez numérica
-        if liquidez_actual[b] >= (monto - EPSILON):
-            liquidez_actual[b] -= monto
-            nuevos_prestamos_matrix[f, b] = monto
-
-        # Caso 2: Necesita interbancario
-        else:
-            propio = np.maximum(liquidez_actual[b], 0.0)
-            faltante = monto - propio
-
-            lender = mejores_lenders_idx[b]
-
-            # Verificar si el prestamista interbancario tiene fondos
-            if liquidez_actual[lender] >= (faltante - EPSILON):
-                # Transacción exitosa
-                liquidez_actual[lender] -= faltante
-                liquidez_actual[b] = 0.0  # Usa todo lo propio
-
-                # Actualizar Red de Pasivos: Banco b ahora debe a Lender
-                nueva_matriz_ib[b, lender] += faltante
-
-                nuevos_prestamos_matrix[f, b] = monto
-            else:
-                # Credit Crunch: Préstamo denegado
-                pass
-
-    return (
-        nuevos_prestamos_matrix, # Matrix (F, B)
-        tasas_finales,
-        nueva_matriz_ib,
-        liquidez_actual,
-        bancos_elegidos,
-        tax_matrix, # [Refactor] Exportamos matrix impositiva para contabilidad
-        metadata_debug,
-    )
-
-
-# -------------------------------------------------------------------------
-# UTILIDADES: DebtRank & SRT
-# -------------------------------------------------------------------------
-
-
-def calcular_matriz_srt(L, equity, probs_default, zeta):
-    """
-    Calcula el Impuesto SRT para cada link potencial.
-    
-    SRT_ij = Zeta * max(0, EL_syst(+loan) - EL_syst(base))
-    
-    Implementa Ecuación 5 del paper [cite: Eq. 5] y cálculo de Marginal Systemic Risk Contribution.
-    
-    Complejidad: O(B^3) debido a DebtRank anidado.
-
-    Ref: [cite: 136-138, 151-153]
-    """
-    B = L.shape[0]
-    tax_matrix = np.zeros((B, B))
-    delta_el_matrix = np.zeros((B, B))
-
-    # 1. Calcular DebtRank Base (R_i) y Valor Económico (v_i)
-    # Valor Económico v_i = Activos Interbancarios prestados / Total Sistema
-    # Ref: [cite: 947] v_i = L_i / sum(L_j)
-    total_lending = np.sum(L, axis=0)  # Sumar col (lo que i ha prestado a otros)
-    V_total = np.sum(total_lending)
-
-    # Optimization: Early exit if no interbank liabilities exist
-    if V_total == 0:
-        return tax_matrix, delta_el_matrix  # Si no hay red, no hay riesgo sistémico
-
-    v = total_lending / V_total
-
-    # Pérdida Sistémica Esperada Base (EL_base)
-    # EL = sum(p_i * V_total * R_i) [cite: 111, 138]
-    # Ecuación 3 del paper (implícita)
-    R_base = calcular_debtrank_vector(L, equity, v)
-    EL_base = np.sum(probs_default * V_total * R_base)
-
-    # 2. Cálculo Marginal (Perturbación)
-    # Simulamos añadir un préstamo unitario para ver el gradiente del riesgo
-    delta_loan = p.DELTA_LOAN_TEST
-
-    # Nota: Bucle O(B^2) llamando a DebtRank O(B). Complejidad O(B^3).
-    # Para B=20 es muy rápido.
-    for borrower in range(B):
-        for lender in range(B):
-            if borrower == lender:
-                continue
-
-            # Red Hipotética
-            L_hypo = L.copy()
-            L_hypo[borrower, lender] += delta_loan
-
-            # Recalcular métricas hipotéticas
-            total_lending_hypo = np.sum(L_hypo, axis=0)
-            V_total_hypo = np.sum(total_lending_hypo)
-            v_hypo = total_lending_hypo / V_total_hypo
-
-            R_hypo = calcular_debtrank_vector(L_hypo, equity, v_hypo)
-            EL_hypo = np.sum(probs_default * V_total_hypo * R_hypo)
-
-            # Contribución Marginal [cite: 137]
-            delta_EL = EL_hypo - EL_base
-            delta_el_matrix[borrower, lender] = delta_EL
-
-            # SRT (Tasa)
-            if delta_EL > 0:
-                # El paper define SRT como valor monetario.
-                # Para pasarlo a tasa de interés, dividimos por el monto del préstamo.
-                # Tax Rate = (Zeta * Delta_EL) / Loan_Amount
-                tax_value = zeta * delta_EL
-                tax_rate = tax_value / delta_loan
-                tax_matrix[borrower, lender] = tax_rate
-
-    return tax_matrix, delta_el_matrix
-
-
-def calcular_debtrank_vector(L, C, v):
-    """
-    Calcula DebtRank R_i para todos los nodos.
-    Ref: Appendix D [cite: 936-977]
-
-    L: Matriz Pasivos (Filas=Deudor, Cols=Acreedor)
-    C: Capital
-    v: Valor Económico
-    """
-    B = len(C)
-
-    # Matriz de Impacto W_ij: Impacto de i (deudor) sobre j (acreedor)
-    # Si i quiebra, j pierde L[i,j].
-    # W_ij = min(1, L[i,j] / C[j]) [cite: 943]
-
-    W = np.zeros((B, B))
-    for i in range(B):  # Defaulter potencial
-        for j in range(B):  # Victima
-            if C[j] > 0:
-                loss = L[i, j]  # i le debe a j
-                W[i, j] = min(1.0, loss / C[j])
-            else:
-                # Si j ya está quebrado (C <= 0), impacto es máximo si hay deuda
-                if L[i, j] > 0:
-                    W[i, j] = 1.0
-
-    # Algoritmo Recursivo [cite: 958]
-    # Calculamos el impacto R_i para cada nodo i iniciando un distress h_i=1
-
-    R = np.zeros(B)
-
-    for i in range(B):
-        # Estado inicial: i colapsa
-        h_initial = np.zeros(B)
-        h_initial[i] = 1.0  # [cite: 956]
+    # 3. Cálculo Recursivo
+    # Versión simplificada matricial: R = v * (I - W)^-1
+    # Matriz (I - W)^-1 captura la propagación
+    I = np.eye(B)
+    try:
+        # Impact matrix total M = (I - W)^-1
+        M = np.linalg.inv(I - W) 
+        # R_i = Sum_j (M_ij * v_j)
+        R = M @ v 
+    except np.linalg.LinAlgError:
+        R = v # Fallback si singular
         
-        h = h_initial.copy()
+    return np.clip(R, 0, 1)
 
-        # Propagación (Iterar hasta convergencia o máximo B pasos)
-        for t in range(B):
-            h_prev = h.copy()
+def paso2(state, params):
+    """
+    PASO 2: Mercado de Crédito (Firms-Banks) e Interbancario (Banks-Banks)
+    
+    1. Empresas piden crédito para cubrir salarios (Eq. A1).
+    2. Bancos evalúan liquidez. Si falta, van al interbancario.
+    3. Mercado Interbancario con SRT (Eq. 5, A4).
+    """
+    
+    F = params.F
+    B = params.B
+    
+    # --- A. DESEMPAQUETAR ESTADO ---
+    L_demand_F = state['firms_labor_demand'] # (F,)
+    
+    # Manejo robusto de Salarios
+    if 'firms_wage' in state:
+        W_wage = state['firms_wage']
+    else:
+        W_wage = np.full(F, params.W_BASE)
+        
+    Liq_F = state['firms_liquidity']         # (F,)
+    Equity_F = state['firms_equity']         # (F,)
+    
+    Liq_B = state['banks_liquidity']          # (B,) corrected key
+    Equity_B = state['banks_equity']          # (B,) corrected key
+    
+    # Redes actuales (Stocks de deuda)
+    L_FB = state['net_FB'] 
+    L_BB = state['net_BB']
+    
+    # --- B. MERCADO DE CRÉDITO (FIRMS -> BANKS) ---
+    
+    # 1. Calcular Necesidad de Crédito (Firms)
+    payroll = L_demand_F * W_wage
+    # Solo piden si no tienen liquidez suficiente
+    credit_needed_F = np.maximum(0, payroll - Liq_F) # (F,)
+    
+    # 2. Asignación Banco-Empresa (Relación Fija o Preferente)
+    bank_indices = np.arange(F) % B
+    
+    # 3. Calcular Tasa de Interés Firmas (Eq. A1)
+    # r_ik = r_bar * (1 + chi * mu(fragilidad))
+    total_debt_F = np.sum(L_FB, axis=1)
+    fragility_F = np.zeros(F)
+    mask_pos = (Liq_F + total_debt_F) > 0
+    fragility_F[mask_pos] = total_debt_F[mask_pos] / (Liq_F[mask_pos] + total_debt_F[mask_pos] + 1e-9)
+    
+    chi = np.random.uniform(0, 0.1, F) # Especificidad
+    mu = np.tanh(fragility_F)          # Función monótona
+    
+    r_firms = params.R_BAR * (1 + chi * mu)
+    
+    # 4. Concesión de Crédito (Tentativa)
+    mask_high_rate = r_firms > params.R_MAX
+    credit_taken_F = credit_needed_F.copy()
+    credit_taken_F[mask_high_rate] *= params.PHI
+    
+    # Actualizar liquidez empresas (reciben el dinero)
+    Liq_F += credit_taken_F
+    
+    # Registrar nueva deuda en L_FB
+    # Usamos np.add.at para sumar vectorialmente a la matriz en las posiciones correctas
+    np.add.at(L_FB, (np.arange(F), bank_indices), credit_taken_F)
+    
+    # Actualizar tasas FB (donde hubo nuevo préstamo)
+    # state['rates_FB'] se actualiza fuera o aquí?
+    # Mejor devolver las tasas para actualizar en main o actualizar matrix directo si se pasara.
+    # Dado que state es mutable y se pasa ref, 'net_FB' ya se actualizó.
+    # Necesitamos pasar tasas.
+    
+    # Impacto en Liquidez Bancaria (Salida de caja)
+    withdrawals_per_bank = np.bincount(bank_indices, weights=credit_taken_F, minlength=B)
+    Liq_B -= withdrawals_per_bank
+    
+    
+    # --- C. MERCADO INTERBANCARIO (BANKS -> BANKS) ---
+    
+    # 1. Identificar Déficit y Superávit
+    deficit_B_mask = Liq_B < 0
+    surplus_B_mask = Liq_B > 0
+    
+    demand_IB = np.abs(Liq_B[deficit_B_mask])
+    supply_IB = Liq_B[surplus_B_mask]
+    
+    idxs_deficit = np.where(deficit_B_mask)[0]
+    idxs_surplus = np.where(surplus_B_mask)[0]
+    
+    tax_matrix = np.zeros((B, B)) # Para reporting
+    delta_el_matrix = np.zeros((B, B)) # Para reporting
+
+    if len(idxs_deficit) > 0 and len(idxs_surplus) > 0:
+        
+        # 2. Calcular DebtRank ACTUAL (Antes de nuevos préstamos)
+        R_current = calcular_debtrank_vector(L_BB, Equity_B)
+        
+        # 3. Tasa Interbancaria con Impuestos
+        # r_ij = r_bar * (1 + psi * mu(leverage_i))
+        leverage_B = np.zeros(B)
+        mask_eq = Equity_B > 0
+        
+        total_liab_IB = np.sum(L_BB, axis=1) # Lo que i debe a otros
+        leverage_B[mask_eq] = total_liab_IB[mask_eq] / Equity_B[mask_eq]
+        
+        mu_B = np.tanh(leverage_B)
+        
+        # Tasa base para los deficitarios
+        r_base_IB = params.R_BAR * (1 + params.RANGO_PSI * mu_B[idxs_deficit])
+        
+        # Añadir Impuesto
+        # MODO_IMPUESTO debe estar en params
+        modo = getattr(params, 'MODO_IMPUESTO', 'NINGUNO')
+        
+        # Tax matrix local (Deficit x Surplus)
+        tax_matrix_local = np.zeros((len(idxs_deficit), len(idxs_surplus)))
+        
+        if modo == 'SRT':
+            # SRT ~ Zeta * R_i
+            srt_rates = params.ZETA * R_current[idxs_deficit]
+            tax_matrix_local = srt_rates[:, np.newaxis] + np.zeros((len(idxs_deficit), len(idxs_surplus)))
             
-            # DebtRank Correcto: Fixed Point Iteration
-            # h(t+1) = min(1, h_initial + sum(h(t) * W))
-            # No acumulamos el flujo sobre el nivel previo, sino que recalculamos 
-            # el nivel total de distress sostenido por la red.
+            # Guardar en matriz global para output
+            # Broadcast to fill (Deficit rows, Surplus cols)
+            # Como todos los surplus ofrecen lo mismo, llenamos
+            for idx_d_local, idx_d_global in enumerate(idxs_deficit):
+                tax_matrix[idx_d_global, idxs_surplus] = srt_rates[idx_d_local]
+                # Delta EL proxy
+                delta_el_matrix[idx_d_global, idxs_surplus] = srt_rates[idx_d_local] / params.ZETA
+
+        elif modo == 'TOBIN':
+            tax_matrix_local[:] = params.TASA_TOBIN
+            tax_matrix[np.ix_(idxs_deficit, idxs_surplus)] = params.TASA_TOBIN
             
-            impact_from_network = np.dot(h, W)
-            h = np.minimum(1.0, h_initial + impact_from_network)
-
-            if np.allclose(h, h_prev):
-                break
-
-        # R_i = sum(h_j * v_j) - h_i * v_i (Excluyendo pérdida directa propia) [cite: 971]
-        R[i] = np.sum(h * v) - (h[i] * v[i])
-
-    return R
+        # 4. Matching (Clearing)
+        supply_remaining = supply_IB.copy()
+        
+        # Iterar sobre demandantes (Deficit)
+        for i_local, i_global in enumerate(idxs_deficit):
+            amount_needed = demand_IB[i_local]
+            if amount_needed < 1e-9: continue
+            
+            took_total = 0
+            for j_local, j_global in enumerate(idxs_surplus):
+                if supply_remaining[j_local] > 0:
+                    amount = min(amount_needed - took_total, supply_remaining[j_local])
+                    
+                    # Ejecutar Transacción
+                    supply_remaining[j_local] -= amount
+                    took_total += amount
+                    
+                    # Actualizar Matriz Interbancaria Global
+                    L_BB[i_global, j_global] += amount
+                    
+                    # Actualizar Liquidez
+                    Liq_B[i_global] += amount
+                    Liq_B[j_global] -= amount
+                    
+                    if took_total >= amount_needed - 1e-9:
+                        break
+    
+    # --- D. ACTUALIZAR ESTADO ---
+    # Actualizar salarios reales pagados
+    # Si hubo préstamo, Liq_F aumentó. Verificamos cuánto se puede pagar.
+    payroll_possible = Liq_F
+    L_hired_F = np.minimum(L_demand_F, np.floor(payroll_possible / W_wage))
+    
+    # Pagar salarios (Salida de caja empresas)
+    wages_paid = L_hired_F * W_wage
+    Liq_F -= wages_paid
+    
+    return {
+        'net_FB': L_FB,
+        'net_BB': L_BB,
+        'firms_liquidity': Liq_F,
+        'banks_liquidity': Liq_B, # corrected key
+        'firms_labor_demand': L_hired_F, 
+        'wages_paid_vector': wages_paid,
+        'tax_matrix': tax_matrix,
+        'new_rates_FB': r_firms, # Para actualizar rates_FB
+        'bank_indices': bank_indices, # Para saber quién prestó a quién
+        'delta_el': delta_el_matrix
+    }
