@@ -48,7 +48,8 @@ def paso1(state, params):
     
     # 3. Lógica Vectorial de Ajuste (Eq. 1 Gualdi et al. 2014)
     # Definir máscaras booleanas para los 4 casos posibles
-    excess_demand = D_prev > Y_prev
+    # Fix: Incluir igualdad en excess_demand (Market Clearing es señal positiva)
+    excess_demand = D_prev >= Y_prev
     excess_supply = ~excess_demand
     price_high    = P_prev >= P_avg
     price_low     = ~price_high

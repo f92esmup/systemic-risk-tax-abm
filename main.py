@@ -161,6 +161,12 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         state['firms_production'] = produccion_real
         state['labor_matrix'] = wages_matrix_FH
         
+        # --- CORRECCIÓN STOCK-FLOW: PAGO DE SALARIOS A HOGARES ---
+        # Sumar los salarios recibidos por cada hogar (sumando sobre empresas)
+        total_wages_H = np.sum(wages_matrix_FH, axis=0) # (H,)
+        state['households_deposits'] += total_wages_H
+        # ---------------------------------------------------------
+        
         # Paso 4: Consumo (Matrix HF)
         # Factura pagada es wages_paid_vector
         res_p4 = paso4(state, p)

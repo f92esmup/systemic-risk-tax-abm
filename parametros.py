@@ -34,6 +34,7 @@ class Param:
     FACTOR_PROB_DEFAULT = 0.01  # Escalar para proxy de riesgo (Eq. A4)
     RANGO_PSI = 0.1             # Variabilidad idiosincrática interbancaria (0 a 0.1)
     DELTA_LOAN_TEST = 1.0       # Monto del préstamo hipotético para cálculo SRT
+    PROB_BAILOUT = 0.5          # Probabilidad de rescate (bailout) de firma [cite: Paper 2]
 
 
 

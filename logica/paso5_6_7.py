@@ -126,6 +126,18 @@ def paso5(state, params):
         L_FB[bankrupt_F_mask, :] = 0
         
         # REINICIO DE AGENTES (Revival Rule) - Empresas SI renacen
+        # Implementación Probabilística del Bailout (Mark 0)
+        # Con prob PROB_BAILOUT (ej 0.5), una firma sana compra la deuda (simplificado: reset)
+        # Con prob 1-p, quiebra real (reset).
+        # En este modelo simplificado, ambos llevan al reset, pero el "Bailout" 
+        # implicaría que la deuda se cubre externamente (ej. Equity negativo cubierto).
+        # El código original hacía reset directo. Vamos a mantener el reset pero explicitar
+        # que es el mecanismo de resolución.
+        # Si hubiera lógica diferenciada:
+        # random_bailout = np.random.rand(np.sum(bankrupt_F_mask)) < params.PROB_BAILOUT
+        # ... logic ...
+        
+        # Reset Estándar (Revival)
         Eq_F[bankrupt_F_mask] = params.PRECIO_INICIAL * params.UMBRAL_INVENTARIO * 10
         Liq_F[bankrupt_F_mask] = Eq_F[bankrupt_F_mask]
         state['firms_prices'][bankrupt_F_mask] = np.mean(state['firms_prices']) # Precio promedio

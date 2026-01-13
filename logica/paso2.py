@@ -15,39 +15,59 @@ def calcular_debtrank_vector(L, equity_banks, W_initial=None):
     """
     B = len(equity_banks)
     
-    # 1. Matriz de Impacto W_ij (Eq. D1)
-    # W_ij = min(1, L_ij / C_j) -> Impacto de i en j si i quiebra
-    # Evitar división por cero
-    C_j_inv = np.zeros_like(equity_banks)
-    mask_c = equity_banks > 0
-    C_j_inv[mask_c] = 1.0 / equity_banks[mask_c]
+    # 1. Matriz de Impacto W_ij (Eq. D1 Corregida según Paper)
+    # Paper def: W_ij = Impacto de j sobre i (Victima i, Causante j)
+    # W_ij = min(1, L_ij / E_i) donde L_ij es loan de j a i (i debe a j)
     
-    # Broadcasting: L es (i, j), C_j es (j,)
-    # W[i, j] = L[i, j] / Equity[j]
-    W = np.minimum(1.0, L * C_j_inv[np.newaxis, :])
+    C_inv = np.zeros_like(equity_banks)
+    mask_c = equity_banks > 0
+    C_inv[mask_c] = 1.0 / equity_banks[mask_c]
+    
+    # L[i, j] es i debe a j.
+    # Queremos W[i, j] = Impacto de j sobre i.
+    # Impacto de j sobre i ocurre porque i tiene activo (prestamo a j)? No.
+    # Si j quiebra, i pierde. i prestó a j. i tiene activo "loan to j".
+    # En L[borrower, lender], "j debe a i" es L[j, i].
+    # Entonces si j quiebra, i pierde L[j, i].
+    # Impacto en i = L[j, i] / Equity[i].
+    # W[i, j] = L[j, i] / Equity[i].
+    
+    # Transponemos L para tener L.T[i, j] = L[j, i] (lo que j debe a i)
+    L_trans = L.T 
+    
+    # W[i, j] = L_trans[i, j] * C_inv[i]
+    W = np.minimum(1.0, L_trans * C_inv[:, np.newaxis])
     
     # 2. Valor Económico v_i (Eq. D2: Proxy = Total Liabilities Interbank)
-    # v_i = sum_j(L_ji) / sum(L) -> Cuánto debe i al sistema (Incoming loans)
-    # Ojo: L[i,j] es lo que i debe a j. Total pasivos de i es sum(L[i, :])
-    # Paper usa L_i = sum_j L_ji (activos prestados por otros a i) para importancia.
-    L_i = np.sum(L, axis=1) 
-    total_L = np.sum(L)
-    if total_L > 0:
-        v = L_i / total_L
+    # v_i = sum_k(L_ki) / sum(L) -> Activos de i (lo que prestó)
+    # L[k, i] es lo que k debe a i. Sum_k L[k, i] = Total Assets de i.
+    total_assets = np.sum(L, axis=0) # Sum over borrowers -> Assets of Lender
+    total_val = np.sum(total_assets)
+    
+    if total_val > 0:
+        v = total_assets / total_val
     else:
         v = np.ones(B) / B
 
     # 3. Cálculo Recursivo
-    # Versión simplificada matricial: R = v * (I - W)^-1
-    # Matriz (I - W)^-1 captura la propagación
+    # Si W[i,j] es impacto de j en i.
+    # Distress de i: h_i = Sum_j W[i,j] * h_j + v_i (si v es distress inicial)
+    # h = W @ h + v_initial.
+    # h = (I - W)^-1 @ v_initial.
+    
+    # Para DebtRank R_j (Impacto CAUSADO por j):
+    # R_j = Sum_i (Distress inducido en i por j) * Value_i
+    # Distress inducido en i por j es M_ij (elemento i,j de la inversa).
+    # R_j = Sum_i M_ij * v_i
+    
     I = np.eye(B)
     try:
-        # Impact matrix total M = (I - W)^-1
+        # M = (I - W)^-1
         M = np.linalg.inv(I - W) 
-        # R_i = Sum_j (M_ij * v_j)
-        R = M @ v 
+        # R_j = Sum_i (v_i * M_ij) -> R = v @ M
+        R = v @ M
     except np.linalg.LinAlgError:
-        R = v # Fallback si singular
+        R = v 
         
     return np.clip(R, 0, 1)
 
