@@ -41,7 +41,7 @@ class Param:
     # --- Parámetros de Ajuste Adaptativo (Paso 1) ---
     # Rango de ajuste aleatorio para precios y cantidades (Greenwald-Stiglitz)
     RANGO_AJUSTE_MIN = 0.01
-    RANGO_AJUSTE_MAX = 0.05
+    RANGO_AJUSTE_MAX = 0.02
     
     # Parámetros de Estabilidad Numérica (Paso 1)
     UMBRAL_INVENTARIO = 1e-4        # Nivel mínimo para considerar exceso de stock
@@ -53,14 +53,14 @@ class Param:
     TASA_TOBIN = 0.002  # 0.2% tasa fija [cite: 250]
 
     # --- Inicialización (Valores Semilla) ---
-    PRECIO_INICIAL = 1.5
-    PRODUCCION_INICIAL = 15.0  # [Tuning] Aumentado para mayor factura salarial 
-    EQUITY_INICIAL_FIRMAS = 10.0
-    LIQUIDEZ_INICIAL_FIRMAS = 30.0 # [Tuning] Reducido para forzar demanda crédito
+    PRECIO_INICIAL = 12.0  # Debe ser > W_BASE/ALPHA = 10.0
+    PRODUCCION_INICIAL = 1.3  # Ajustado: 1300H / 100F * ALPHA(0.1) = 1.3
+    EQUITY_INICIAL_FIRMAS = 100.0 # Aumentado para absorber choques iniciales
+    LIQUIDEZ_INICIAL_FIRMAS = 100.0
 
 
-    EQUITY_INICIAL_BANCOS = 500.0   # Aumentado para resistencia
-    LIQUIDEZ_INICIAL_BANCOS = 300.0 # [Tuning] Ajustado para incentivar préstamos
+    EQUITY_INICIAL_BANCOS = 5000.0   
+    LIQUIDEZ_INICIAL_BANCOS = 5000.0 
 
-    DEPOSITOS_INICIALES_HOGARES = 10.0
+    DEPOSITOS_INICIALES_HOGARES = 50.0
 

@@ -286,6 +286,9 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             "net_HB": deposits_hb_matrix
         }
 
+        # [FIX] Record data in logger
+        logger.log_step(t, agents, networks)
+
 
     logger.flush(run_id)
     return historia

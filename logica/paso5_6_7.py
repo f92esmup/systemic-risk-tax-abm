@@ -100,6 +100,9 @@ def paso5(state, params):
     # Actualizar Equity
     Eq_F += profits_F
     
+    # [FIX] Guardar beneficios para uso en paso1 (Actualización de Salarios)
+    state['firms_last_profit'] = profits_F.copy()
+    
     # Dividendos (si Equity > 0 y Profit > 0)
     div_mask = (Eq_F > 0) & (profits_F > 0)
     dividends = np.zeros(F)

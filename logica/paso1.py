@@ -33,6 +33,45 @@ def paso1(state, params):
     
     F = params.F
     
+    # [FIX] Wage Update (Dynamic Wages - Paper 2 Extensión)
+    # Se realiza antes de planificar producción t+1, usando resultados t-1.
+    if 'firms_last_profit' in state and 'firms_wage' in state:
+        W_prev = state['firms_wage']
+        Profits_prev = state['firms_last_profit']
+        
+        # Calcular Desempleo (u) y Empleo (epsilon)
+        # Asumimos que firms_labor_demand en state refleja los contratados t-1
+        H_total = params.H
+        Total_Employed = np.sum(state['firms_labor_demand'])
+        u = max(0, 1.0 - (Total_Employed / H_total))
+        epsilon = 1.0 - u
+        
+        # Aleatoriedad (xi) para salarios (gamma_w ~ 0.02 approx)
+        gamma_w = 0.02
+        xi_w = np.random.uniform(0, 1, F)
+        
+        # Mascaras de ajuste
+        # Subir salario: Excess Demand (Y < D) y Beneficios > 0
+        raise_wage_mask = (D_prev > Y_prev) & (Profits_prev > 0)
+        
+        # Bajar salario: Excess Supply (Y > D) y Beneficios < 0
+        cut_wage_mask = (D_prev < Y_prev) & (Profits_prev < 0)
+        
+        # Aplicar Cambios
+        # W(t+1) = W(t) * (1 + gamma * epsilon * xi) [Si demanda alta, sube más si hay pleno empleo]
+        W_new = W_prev.copy()
+        
+        W_new[raise_wage_mask] *= (1 + gamma_w * epsilon * xi_w[raise_wage_mask])
+        
+        # W(t+1) = W(t) * (1 - gamma * u * xi) [Si oferta alta, baja más si hay mucho desempleo]
+        W_new[cut_wage_mask] *= (1 - gamma_w * u * xi_w[cut_wage_mask])
+        
+        # Guardar
+        state['firms_wage'] = np.maximum(W_new, params.W_BASE * 0.5) # Suelo salarial
+        
+    
+    F = params.F
+    
     # 1. Calcular Precio Promedio de Mercado (Weighted Average)
     # Se usa para comparar si el precio de la firma es alto o bajo
     total_sales = np.minimum(Y_prev, D_prev)

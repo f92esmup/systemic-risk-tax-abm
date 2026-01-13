@@ -177,59 +177,91 @@ def paso2(state, params):
         
         mu_B = np.tanh(leverage_B)
         
-        # Tasa base para los deficitarios
-        r_base_IB = params.R_BAR * (1 + params.RANGO_PSI * mu_B[idxs_deficit])
+        # 3. Tasa Interbancaria con Impuestos
+        # r_ij = r_bar * (1 + psi * mu(leverage_i))
+        leverage_B = np.zeros(B)
+        mask_eq = Equity_B > 0
         
-        # Añadir Impuesto
+        total_liab_IB = np.sum(L_BB, axis=1) # Lo que i debe a otros
+        leverage_B[mask_eq] = total_liab_IB[mask_eq] / Equity_B[mask_eq]
+        
+        mu_B = np.tanh(leverage_B)
+        
+        # [FIX] Generar especificidad de bancos (Lender specificity)
+        # Debería ser persistente? Por ahora aleatoria cada step como 'chi' en firmas
+        psi_B = np.random.uniform(0, params.RANGO_PSI, B)
+        
         # MODO_IMPUESTO debe estar en params
         modo = getattr(params, 'MODO_IMPUESTO', 'NINGUNO')
         
-        # Tax matrix local (Deficit x Surplus)
-        tax_matrix_local = np.zeros((len(idxs_deficit), len(idxs_surplus)))
-        
-        if modo == 'SRT':
-            # SRT ~ Zeta * R_i
-            srt_rates = params.ZETA * R_current[idxs_deficit]
-            tax_matrix_local = srt_rates[:, np.newaxis] + np.zeros((len(idxs_deficit), len(idxs_surplus)))
-            
-            # Guardar en matriz global para output
-            # Broadcast to fill (Deficit rows, Surplus cols)
-            # Como todos los surplus ofrecen lo mismo, llenamos
-            for idx_d_local, idx_d_global in enumerate(idxs_deficit):
-                tax_matrix[idx_d_global, idxs_surplus] = srt_rates[idx_d_local]
-                # Delta EL proxy
-                delta_el_matrix[idx_d_global, idxs_surplus] = srt_rates[idx_d_local] / params.ZETA
-
-        elif modo == 'TOBIN':
-            tax_matrix_local[:] = params.TASA_TOBIN
-            tax_matrix[np.ix_(idxs_deficit, idxs_surplus)] = params.TASA_TOBIN
-            
-        # 4. Matching (Clearing)
-        supply_remaining = supply_IB.copy()
+        # 4. Matching (Clearing) con Selección Activa
+        supply_remaining = supply_IB.copy() # Vector correspondiente a idxs_surplus
         
         # Iterar sobre demandantes (Deficit)
         for i_local, i_global in enumerate(idxs_deficit):
             amount_needed = demand_IB[i_local]
             if amount_needed < 1e-9: continue
             
-            took_total = 0
+            # Construir lista de ofertas
+            offers = []
+            
             for j_local, j_global in enumerate(idxs_surplus):
-                if supply_remaining[j_local] > 0:
-                    amount = min(amount_needed - took_total, supply_remaining[j_local])
-                    
-                    # Ejecutar Transacción
-                    supply_remaining[j_local] -= amount
-                    took_total += amount
-                    
-                    # Actualizar Matriz Interbancaria Global
-                    L_BB[i_global, j_global] += amount
-                    
-                    # Actualizar Liquidez
-                    Liq_B[i_global] += amount
-                    Liq_B[j_global] -= amount
-                    
-                    if took_total >= amount_needed - 1e-9:
-                        break
+                if supply_remaining[j_local] <= 1e-9:
+                    continue
+                
+                # Calcular Tasa Ofertada por j para i
+                # Eq A2: r_ij = r_bar * (1 + psi_j * mu_i)
+                r_offer = params.R_BAR * (1 + psi_B[j_global] * mu_B[i_global])
+                
+                # Calcular Impuesto
+                tax = 0.0
+                if modo == 'SRT':
+                    # Aprox: Tax proporcional a DebtRank del Borrower (i)
+                    # Nota: Para ser más exacto debería ser marginal, pero usamos la approx del código
+                    tax = params.ZETA * R_current[i_global]
+                elif modo == 'TOBIN':
+                    tax = params.TASA_TOBIN
+                
+                total_rate = r_offer + tax
+                offers.append({
+                    'j_local': j_local,
+                    'j_global': j_global,
+                    'rate': r_offer,
+                    'tax': tax,
+                    'total_cost': total_rate
+                })
+            
+            # [FIX] Selección: Ordenar por menor costo total
+            offers.sort(key=lambda x: x['total_cost'])
+            
+            # Tomar préstamos en orden
+            took_total = 0
+            for off in offers:
+                j_local = off['j_local']
+                j_global = off['j_global']
+                
+                available = supply_remaining[j_local]
+                if available <= 0: continue
+                
+                amount = min(amount_needed - took_total, available)
+                
+                # Ejecutar Transacción
+                supply_remaining[j_local] -= amount
+                took_total += amount
+                
+                # Actualizar Matriz Interbancaria Global
+                L_BB[i_global, j_global] += amount
+                
+                # Actualizar Liquidez
+                Liq_B[i_global] += amount
+                Liq_B[j_global] -= amount
+                
+                # Guardar Tax/Rates para reporting
+                tax_matrix[i_global, j_global] = off['tax']
+                delta_el_matrix[i_global, j_global] = off['tax'] / (params.ZETA if params.ZETA!=0 else 1)
+                
+                if took_total >= amount_needed - 1e-9:
+                    break
     
     # --- D. ACTUALIZAR ESTADO ---
     # Actualizar salarios reales pagados
