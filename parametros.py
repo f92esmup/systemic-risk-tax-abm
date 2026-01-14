@@ -11,7 +11,7 @@ class Param:
     B = 20  # Número de Bancos [cite: 715]
     F = 100  # Número de Empresas [cite: 718]
     H = 1300  # Número de Hogares [cite: 720]
-    T = 500  # Pasos de tiempo de la simulación [cite: 258]
+    T = 20  # Pasos de tiempo de la simulación [cite: 258]
 
     # --- Parámetros Económicos ---
     ALPHA = 0.1  # Productividad laboral [cite: 726]

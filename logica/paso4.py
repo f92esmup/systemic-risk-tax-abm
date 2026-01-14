@@ -39,7 +39,7 @@ def paso4(state, params):
     
     # --- B. MATCHING VECTORIAL (BÚSQUEDA DE PRECIOS) ---
     # Simulamos que cada hogar visita 'VISITS' empresas aleatorias y elige la barata.
-    VISITS = 3 # Número de empresas que "mira" cada consumidor
+    VISITS = params.Z_CONSUMO # Número de empresas que "mira" cada consumidor
     
     # Matriz de índices aleatorios (H, VISITS) -> Qué empresas visita cada hogar
     # randint es rápido para generar la topología de red de consumo estocástica

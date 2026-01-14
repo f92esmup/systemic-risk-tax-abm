@@ -24,6 +24,9 @@ def paso5(state, params):
     
     Liq_B = state['banks_liquidity'] # Key matching main.py
     Eq_B = state['banks_equity']     # Key matching main.py
+
+    # SFC Correction: Households pay for re-initialization
+    H_deposits = state['households_deposits']
     
     # Deudas
     L_FB = state['net_FB'] # Matriz (F, B)
@@ -141,7 +144,17 @@ def paso5(state, params):
         # ... logic ...
         
         # Reset Estándar (Revival)
-        Eq_F[bankrupt_F_mask] = params.PRECIO_INICIAL * params.UMBRAL_INVENTARIO * 10
+        new_equity = params.PRECIO_INICIAL * params.UMBRAL_INVENTARIO * 10
+        
+        # [SFC CORRECTION] Cost must come from households
+        num_bankrupt = np.sum(bankrupt_F_mask)
+        total_bailout_cost = num_bankrupt * new_equity
+        
+        # Deduct from households (owners)
+        # Assuming uniform ownership or tax-like burden
+        H_deposits -= (total_bailout_cost / len(H_deposits))
+        
+        Eq_F[bankrupt_F_mask] = new_equity
         Liq_F[bankrupt_F_mask] = Eq_F[bankrupt_F_mask]
         state['firms_prices'][bankrupt_F_mask] = np.mean(state['firms_prices']) # Precio promedio
     
@@ -223,6 +236,7 @@ def paso5(state, params):
         'firms_liquidity': Liq_F,
         'banks_equity': Eq_B,       # Key matching main.py
         'banks_liquidity': Liq_B,   # Key matching main.py
+        'households_deposits': H_deposits, # [SFC] Updated deposits
         'net_FB': L_FB,
         'net_BB': L_BB,
         'bankruptcies_F': np.sum(bankrupt_F_mask),

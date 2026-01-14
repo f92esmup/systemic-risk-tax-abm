@@ -29,7 +29,7 @@ plt.rcParams.update(PARAMS)
 OUTPUT_DIR = "output_plots"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-SIMULATIONS_PER_MODE = 5  # Cantidad de simulaciones para suavizado estadístico
+SIMULATIONS_PER_MODE = 1  # Cantidad de simulaciones para suavizado estadístico
 
 # =============================================================================
 # MOTOR DE SIMULACIÓN
@@ -93,6 +93,22 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         # Matrices de Flujo (para logger/stats)
         'labor_matrix': np.zeros((F, H))
     }
+
+    # [AUDIT FIX] Initialize Liability Network (Burn-in proxy)
+    # Firms start with some debt to kickstart the credit market topology.
+    initial_loans = np.zeros((F, B))
+    # Assign 1 initial relationship per firm
+    init_banks = np.random.randint(0, B, F)
+    amount = 10.0 # Small initial loan
+    
+    initial_loans[np.arange(F), init_banks] = amount
+    state['net_FB'] = initial_loans
+    
+    # Adjust liquidity (Loan proceeds)
+    state['firms_liquidity'] += np.sum(initial_loans, axis=1)
+    
+    # Banks lose liquidity (Loan disbursement)
+    state['banks_liquidity'] -= np.sum(initial_loans, axis=0)
 
     # Historia (Aggregates for Plots)
     historia = {
@@ -188,6 +204,9 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         state['banks_liquidity'] = res_p5['banks_liquidity']
         state['banks_equity'] = res_p5['banks_equity']
         state['net_BB'] = res_p5['net_BB']
+        
+        # [SFC CORRECTION] Update households deposits (less bailout costs)
+        state['households_deposits'] = res_p5['households_deposits']
         
         dividendos_total = res_p5['dividends_total']
         dividendos_pc = dividendos_total / H
