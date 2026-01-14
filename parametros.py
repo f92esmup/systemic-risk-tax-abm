@@ -46,7 +46,7 @@ class Param:
     
     # Liquidez Firmas: Nómina de 1 mes aprox (13 emp * 2200€ = 28.600€)
     # Les damos menos para obligarlas a pedir crédito.
-    LIQUIDEZ_INICIAL_FIRMAS = 5000.0 
+    LIQUIDEZ_INICIAL_FIRMAS = 15000.0 
     
     # Equity Bancos: Capital Base. Lo hacemos bajo para fragilidad.
     # Antes 20.0 -> Ahora 40.000 €
@@ -54,8 +54,8 @@ class Param:
     
     # Liquidez Bancos: Dinero prestable. Escaso para forzar interbancario.
     # Antes 20.0 -> Ahora 40.000 €
-    # [FIX] Aumentado a 150k para cubrir demanda de nóminas (2.8M total) -> Reducido a 30k para forzar IB
-    LIQUIDEZ_INICIAL_BANCOS = 30000.0 
+    # [FIX] Aumentado a 300k para cubrir demanda de nóminas (2.8M total)
+    LIQUIDEZ_INICIAL_BANCOS = 300000.0 
 
     # Depósitos Hogares: Ahorro inicial
     DEPOSITOS_INICIALES_HOGARES = 100000.0 

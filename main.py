@@ -57,27 +57,61 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     start_time = time.time()
     logger = SimulationLogger()
 
-    # 1. INICIALIZACIÓN
+    # GENERADORES DE HETEROGENEIDAD
+    rng = np.random.default_rng(semilla) # Usar el generador moderno de numpy
+    
+    # Función auxiliar para generar distribución Log-Normal (con media target)
+    def lognorm_vec(mean_val, sigma, size):
+        # Calcular mu para que la media de la distribución sea mean_val
+        # E[X] = exp(mu + sigma^2/2) => mu = ln(mean) - sigma^2/2
+        mu = np.log(mean_val) - (sigma**2 / 2)
+        return rng.lognormal(mu, sigma, size)
+
+    # Función auxiliar para distribución Uniforme centrada
+    def uniform_vec(mean_val, spread_pct, size):
+        low = mean_val * (1 - spread_pct)
+        high = mean_val * (1 + spread_pct)
+        return rng.uniform(low, high, size)
+
+    # 1. INICIALIZACIÓN HETEROGÉNEA
     F, B, H = p.F, p.B, p.H
+
+    # Parámetros de dispersión (sigma para lognormal, pct para uniforme)
+    SIGMA_SIZE = 0.5   # Dispersión de tamaño (Equity, Producción)
+    SPREAD_PRICE = 0.05 # 5% de variación en precios iniciales
+    
+    # Generar vectores base
+    # Empresas: Tamaños diversos
+    prod_ini_vec = lognorm_vec(p.PRODUCCION_INICIAL, SIGMA_SIZE, F)
+    # Equity proporcional al tamaño para mantener ratios sanos al inicio
+    equity_firms_vec = (prod_ini_vec / p.PRODUCCION_INICIAL) * p.EQUITY_INICIAL_FIRMAS
+    liq_firms_vec = (prod_ini_vec / p.PRODUCCION_INICIAL) * p.LIQUIDEZ_INICIAL_FIRMAS
+    
+    # Bancos: Tamaños diversos (Power Law es común en bancos)
+    equity_banks_vec = lognorm_vec(p.EQUITY_INICIAL_BANCOS, SIGMA_SIZE, B)
+    liq_banks_vec = (equity_banks_vec / p.EQUITY_INICIAL_BANCOS) * p.LIQUIDEZ_INICIAL_BANCOS
+    
+    # Hogares: Riqueza diversa
+    deposits_H_vec = lognorm_vec(p.DEPOSITOS_INICIALES_HOGARES, 0.8, H)
 
     state = {
         # Empresas (Firms)
-        "firms_prices": np.full(F, p.PRECIO_INICIAL),
-        "firms_production": np.full(F, p.PRODUCCION_INICIAL),
-        "firms_demand": np.full(F, p.PRODUCCION_INICIAL),
+        "firms_prices": uniform_vec(p.PRECIO_INICIAL, SPREAD_PRICE, F), # Precios ~ Normales
+        "firms_production": prod_ini_vec,
+        "firms_demand": prod_ini_vec.copy(), # Asumimos equilibrio inicial
         "firms_inventory": np.zeros(F),
-        "firms_equity": np.full(F, p.EQUITY_INICIAL_FIRMAS),
-        "firms_liquidity": np.full(F, p.LIQUIDEZ_INICIAL_FIRMAS),
-        "firms_wage": np.full(F, p.W_BASE),  # [NEW] Salarios
-        "firms_target_production": np.full(F, p.PRODUCCION_INICIAL),
-        "firms_labor_demand": np.zeros(F, dtype=int),
+        "firms_equity": equity_firms_vec,
+        "firms_liquidity": liq_firms_vec,
+        "firms_wage": uniform_vec(p.W_BASE, 0.02, F),  # Salarios casi iguales al inicio
+        "firms_target_production": prod_ini_vec.copy(),
+        "firms_labor_demand": np.ceil(prod_ini_vec / p.ALPHA).astype(int), # Calculado según prod específica
         "mask_renacidas": np.zeros(F, dtype=bool),
         # Bancos (Banks)
-        "banks_equity": np.full(B, p.EQUITY_INICIAL_BANCOS),
-        "banks_liquidity": np.full(B, p.LIQUIDEZ_INICIAL_BANCOS),
+        "banks_equity": equity_banks_vec,
+        "banks_liquidity": liq_banks_vec,
         # Hogares (Households)
-        "households_deposits": np.full(H, p.DEPOSITOS_INICIALES_HOGARES),
-        "households_bank": np.random.randint(0, B, size=H),
+        "households_deposits": deposits_H_vec,
+        "households_bank": rng.integers(0, B, size=H), # Asignación aleatoria inicial
         "households_dividends": np.zeros(H),
         # Redes (Networks)
         "net_FB": np.zeros((F, B)),
@@ -88,21 +122,37 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         "labor_matrix": np.zeros((F, H)),
     }
 
-    # [AUDIT FIX] Initialize Liability Network (Burn-in proxy)
-    # Firms start with some debt to kickstart the credit market topology.
-    initial_loans = np.zeros((F, B))
-    # Assign 1 initial relationship per firm
-    init_banks = np.random.randint(0, B, F)
-    amount = 10.0  # Small initial loan
+    # [AUDIT FIX] Initialize Liability Network HETEROGENEA
+    # Préstamos iniciales proporcionales al tamaño de la empresa
+    initial_loans_FB = np.zeros((F, B))
+    init_banks_F = rng.integers(0, B, F)
+    
+    # El préstamo inicial depende del equity de la empresa (ej. 10% del equity)
+    amount_vec_FB = equity_firms_vec * 0.1 
+    
+    initial_loans_FB[np.arange(F), init_banks_F] = amount_vec_FB
+    state["net_FB"] = initial_loans_FB
 
-    initial_loans[np.arange(F), init_banks] = amount
-    state["net_FB"] = initial_loans
+    # [NEW] Initialize Interbank Network (BB) - También escalado
+    initial_loans_BB = np.zeros((B, B))
+    for b in range(B):
+        lenders = rng.choice([i for i in range(B) if i != b], 2, replace=False)
+        # Préstamo ~ 20% del equity del banco prestatario
+        loan_size = equity_banks_vec[b] * 0.2 
+        initial_loans_BB[b, lenders] = loan_size / 2.0 
+    state["net_BB"] = initial_loans_BB
 
-    # Adjust liquidity (Loan proceeds)
-    state["firms_liquidity"] += np.sum(initial_loans, axis=1)
-
-    # Banks lose liquidity (Loan disbursement)
-    state["banks_liquidity"] -= np.sum(initial_loans, axis=0)
+    # Adjust liquidity (Loan proceeds/disbursements)
+    # Firms gain liquidity from FB loans
+    state["firms_liquidity"] += np.sum(initial_loans_FB, axis=1)
+    
+    # Banks: 
+    # - Lose liquidity from FB loans (Lending to firms)
+    # - Gain liquidity from BB borrowing (Borrower side)
+    # - Lose liquidity from BB lending (Lender side)
+    state["banks_liquidity"] -= np.sum(initial_loans_FB, axis=0) # Lending to firms
+    state["banks_liquidity"] += np.sum(initial_loans_BB, axis=1) # Borrowing from banks
+    state["banks_liquidity"] -= np.sum(initial_loans_BB, axis=0) # Lending to banks
 
     # Historia (Aggregates for Plots)
     historia = {

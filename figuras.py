@@ -20,26 +20,37 @@ PARAMS = {
 }
 plt.rcParams.update(PARAMS)
 
+MODES_ORDER = ["NINGUNO", "TOBIN", "SRT"]
+MODE_LABELS = {
+    "NINGUNO": "No Tax", 
+    "TOBIN": "Tobin Tax", 
+    "SRT": "SRT"
+}
+MODE_COLORS = {
+    "NINGUNO": "red",
+    "TOBIN": "blue", 
+    "SRT": "green"
+}
+
 def load_simulation_data(data_dir=DATA_DIR):
     """
     Crawls the outputdata directory and aggregates metrics for plotting.
     Now optimized for Consolidated Parquet Logs (SimulationLogger).
     """
-    modes = ["NINGUNO", "TOBIN", "SRT"]
     results = {m: {
         "debtrank_profiles": [],
-        "scatter_data": [],
+        "scatter_data_x": [], # Relative Loan Size [%]
+        "scatter_data_y": [], # Relative Delta EL [%]
         "total_losses": [],
         "cascade_sizes": [],
         "volumes": []
-    } for m in modes}
+    } for m in MODES_ORDER}
     
     if not os.path.exists(data_dir):
         print(f"Error: Directory {data_dir} not found.")
         return results
 
     # Scan directories
-    # Expected: run_{mode}_sim_{i}
     subdirs = [d for d in os.listdir(data_dir) if d.startswith("run_")]
     
     for run_dir in subdirs:
@@ -51,7 +62,6 @@ def load_simulation_data(data_dir=DATA_DIR):
         if mode not in results: continue
         
         full_run_path = os.path.join(data_dir, run_dir)
-
 
         # --- 1. Global Metrics (Sim-wide) ---
         globals_path = os.path.join(full_run_path, "globals.parquet")
@@ -81,149 +91,173 @@ def load_simulation_data(data_dir=DATA_DIR):
                 last_t = banks_df["t"].max()
                 # Get data for last step
                 final_banks = banks_df[banks_df["t"] == last_t]
-                # Extract DebtRank vector (sorted by bank id usually, but let's just take values)
+                # Extract DebtRank vector
                 results[mode]["debtrank_profiles"].append(final_banks["dr"].values)
 
         # --- 3. SRT Scatter (Delta EL vs Loan Size) ---
-        # Data needed: Transactions list (Loan Amount vs Marginal Delta EL)
-        
         trans_path = os.path.join(full_run_path, "transactions.parquet")
 
         if os.path.exists(trans_path):
             trans_df = pd.read_parquet(trans_path)
             
-            # Filter for SRT relevant data (where marginal_sr is recorded)
-            # Depending on mode, it might be 0, but we want to plot if it exists.
-            if "amount" in trans_df.columns and "marginal_sr" in trans_df.columns:
-                # Filter out tiny loans or zero deltas if desired, but Fig 3d plots everything usually
-                mask = (trans_df["amount"] > 0)
-                valid = trans_df[mask]
-                
-                if not valid.empty:
-                    results[mode]["scatter_data"].append((
-                        valid["amount"].values, 
-                        valid["marginal_sr"].values
-                    ))
+            if "amount" in trans_df.columns and "marginal_sr" in trans_df.columns and "t" in trans_df.columns:
+                # Group by time step to calculate relative size per market state
+                for t, group in trans_df.groupby("t"):
+                    total_vol_t = group["amount"].sum()
+                    if total_vol_t < 1e-9: continue
+                    
+                    # Relative Loan Size [%] = (Amount / Total Volume at t) * 100
+                    # Relative Delta EL [%] = marginal_sr * 100 (assuming H is 0-1)
+                    
+                    mask = group["amount"] > 0
+                    valid = group[mask]
+                    
+                    if not valid.empty:
+                        rel_loans = (valid["amount"].values / total_vol_t) * 100
+                        rel_deltas = valid["marginal_sr"].values * 100
+                        
+                        results[mode]["scatter_data_x"].extend(rel_loans)
+                        results[mode]["scatter_data_y"].extend(rel_deltas)
 
     return results
 
-def plot_fig_3b(results, colors):
+def plot_fig_3b(results):
     plt.figure()
     B = p.B
     x = np.arange(1, B + 1)
     bar_width = 0.25
-    offsets = {"NINGUNO": -bar_width, "TOBIN": 0, "SRT": bar_width}
+    offsets = [ -bar_width, 0, bar_width ]
     
-    for mode in results:
+    # Sort modes to align with offsets
+    
+    for i, mode in enumerate(MODES_ORDER):
         data = results[mode]["debtrank_profiles"]
         if not data: continue
         
-        # Handle varying lengths if any error, but should be B
-        # Stack
+        # Stack to average
         data_array = np.array(data)
-        if data_array.ndim != 2: continue # Skip if empty
+        if data_array.ndim != 2: continue 
         
+        # Sort each run descending (Rank-Size rule)
         sorted_runs = np.sort(data_array, axis=1)[:, ::-1]
+        
         avg_profile = np.mean(sorted_runs, axis=0)
         std_profile = np.std(sorted_runs, axis=0)
         
-        plt.bar(x + offsets[mode], avg_profile, width=bar_width, 
-                color=colors[mode], label=mode, alpha=0.8, yerr=std_profile, capsize=2)
+        plt.bar(x + offsets[i], avg_profile, width=bar_width, 
+                color=MODE_COLORS[mode], label=MODE_LABELS[mode], 
+                alpha=0.8)
         
     plt.xlabel('Bank Rank (by DebtRank)')
     plt.ylabel('DebtRank $R_i$')
-    plt.title('Fig 3b: Perfil de Riesgo Sistémico')
+    plt.title('Fig 3b: Perfil de Riesgo Sistémico (Rank-Ordered)')
     plt.legend()
     plt.tight_layout()
     plt.savefig(f"{OUTPUT_DIR}/Fig_3b_DebtRank.png")
     plt.close()
 
-def plot_fig_3d(results, colors):
+def plot_fig_3d(results):
     plt.figure()
-    has_data = False
-    for mode in results:
-        if not results[mode]["scatter_data"]: continue
+    
+    for mode in MODES_ORDER:
+        xs = results[mode]["scatter_data_x"]
+        ys = results[mode]["scatter_data_y"]
         
-        all_l, all_d = [], []
-        for l, d in results[mode]["scatter_data"]:
-            all_l.extend(l)
-            all_d.extend(d)
+        if not xs: continue
         
-        if not all_l: continue
+        xs = np.array(xs)
+        ys = np.array(ys)
         
-        # [FIX] Filter out zeros/negative values for log-log plot to avoid errors
-        all_l = np.array(all_l)
-        all_d = np.array(all_d)
-        mask = (all_l > 0) & (all_d > 0)
-        
+        # Log scale needs positive values
+        mask = (xs > 0) & (ys > 0)
         if np.sum(mask) == 0: continue
-
-        plt.scatter(all_l[mask], all_d[mask], color=colors[mode], alpha=0.3, label=mode, s=10, edgecolors='none')
-        has_data = True
         
-    if has_data:
-        plt.xscale('log')
-        plt.yscale('log')
-        plt.xlabel('Loan Size (Log)')
-        plt.ylabel(r'$\Delta EL^{syst}$ (Log)')
-        plt.title('Fig 3d: Contribución Marginal al Riesgo')
-        plt.legend()
-        plt.grid(True, which="both", ls="-", alpha=0.2)
-        plt.tight_layout()
-        plt.savefig(f"{OUTPUT_DIR}/Fig_3d_Scatter.png")
-    else:
-        print("⚠️ ADVERTENCIA: No hay datos válidos para el gráfico 3D (Posible DebtRank=0 o no SRT run)")
+        plt.scatter(xs[mask], ys[mask], color=MODE_COLORS[mode], 
+                    alpha=0.3, label=MODE_LABELS[mode], s=15, edgecolors='none')
+        
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.xlabel('Relative Loan Size [%]')
+    plt.ylabel(r'Relative $\Delta EL^{syst}$ [%]')
+    plt.title('Fig 3d: Contribución Marginal al Riesgo')
+    plt.legend()
+    plt.grid(True, which="both", ls="-", alpha=0.2)
+    plt.tight_layout()
+    plt.savefig(f"{OUTPUT_DIR}/Fig_3d_Scatter.png")
     plt.close()
 
-def plot_fig_4(results, colors):
+def plot_fig_4(results):
+    # Prepare data lists for side-by-side plotting
+    # Helper to clean Nones or empties
+    def get_clean_list(metric_key):
+        data_list = []
+        labels = []
+        colors = []
+        for mode in MODES_ORDER:
+            d = results[mode][metric_key]
+            if d:
+                data_list.append(d)
+                labels.append(MODE_LABELS[mode])
+                colors.append(MODE_COLORS[mode])
+            else:
+                # Placeholder to keep alignment if needed, or skip
+                # Matplotlib hist handles different lengths fine
+                pass 
+        return data_list, labels, colors
+
     # 4a Losses
     plt.figure()
-    for mode in results:
-        if not results[mode]["total_losses"]: continue
-        plt.hist(results[mode]["total_losses"], bins=15, color=colors[mode], alpha=0.5, label=mode, density=True)
-    plt.title('Fig 4a: Pérdidas Totales')
+    d, l, c = get_clean_list("total_losses")
+    if d:
+        plt.hist(d, bins=10, color=c, label=l, density=True, histtype='bar')
+    plt.title('Fig 4a: Pérdidas Totales a Bancos')
+    plt.xlabel('Total Loss')
+    plt.ylabel('Frequency')
     plt.legend()
     plt.savefig(f"{OUTPUT_DIR}/Fig_4a_Losses.png")
     plt.close()
 
     # 4b Cascades
     plt.figure()
-    bins = np.arange(0, p.B + 2) - 0.5
-    for mode in results:
-        if not results[mode]["cascade_sizes"]: continue
-        plt.hist(results[mode]["cascade_sizes"], bins=bins, color=colors[mode], alpha=0.5, label=mode, density=True, histtype='stepfilled')
+    d, l, c = get_clean_list("cascade_sizes")
+    if d:
+        bins = np.arange(0, p.B + 2) - 0.5
+        plt.hist(d, bins=bins, color=c, label=l, density=True, histtype='bar')
     plt.title('Fig 4b: Tamaño de Cascadas')
+    plt.xlabel('Banks defaulted in one step')
+    plt.ylabel('Frequency')
     plt.legend()
     plt.savefig(f"{OUTPUT_DIR}/Fig_4b_Cascades.png")
     plt.close()
 
     # 4c Volume
     plt.figure()
-    for mode in results:
-        if not results[mode]["volumes"]: continue
-        plt.hist(results[mode]["volumes"], bins=15, color=colors[mode], alpha=0.5, label=mode, density=True)
-    plt.title('Fig 4c: Volumen Interbancario')
+    d, l, c = get_clean_list("volumes")
+    if d:
+        plt.hist(d, bins=10, color=c, label=l, density=True, histtype='bar')
+    plt.title('Fig 4c: Volumen Mercado Interbancario')
+    plt.xlabel('Avg Transaction Volume')
+    plt.ylabel('Frequency')
     plt.legend()
     plt.savefig(f"{OUTPUT_DIR}/Fig_4c_Volume.png")
     plt.close()
 
 def generar_graficas():
-    print("--- Generando Gráficos desde Parquet ---")
-    colors = {"NINGUNO": "red", "TOBIN": "blue", "SRT": "green"}
+    print("--- Generando Gráficos Finales ---")
     
     print("Cargando datos...")
     data = load_simulation_data()
     
-    print("Plotting Fig 3b...")
-    plot_fig_3b(data, colors)
+    print("Generando Fig 3b (DebtRank Profile)...")
+    plot_fig_3b(data)
     
-    print("Plotting Fig 3d...")
-    plot_fig_3d(data, colors)
+    print("Generando Fig 3d (Scatter Relative)...")
+    plot_fig_3d(data)
     
-    print("Plotting Fig 4...")
-    plot_fig_4(data, colors)
+    print("Generando Fig 4 (Distributions)...")
+    plot_fig_4(data)
     
-    print(f"Listo. Resultados en ./{OUTPUT_DIR}")
+    print(f"Listo. Resultados guardados en ./{OUTPUT_DIR}")
 
 if __name__ == "__main__":
     generar_graficas()
