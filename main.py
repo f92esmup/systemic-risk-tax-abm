@@ -28,7 +28,7 @@ plt.rcParams.update(PARAMS)
 OUTPUT_DIR = "output_plots"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-SIMULATIONS_PER_MODE = 60  # Cantidad de simulaciones para suavizado estadísticoSIMULATIONS_PER_MODE = 5  # Cantidad de simulaciones para suavizado estadístico
+SIMULATIONS_PER_MODE = 6  # Cantidad de simulaciones para suavizado estadísticoSIMULATIONS_PER_MODE = 5  # Cantidad de simulaciones para suavizado estadístico
 
 # =============================================================================
 # MOTOR DE SIMULACIÓN
@@ -137,6 +137,9 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         state["firms_liquidity"] = res_p2["firms_liquidity"]
         state["banks_liquidity"] = res_p2["banks_liquidity"]
         state["firms_labor_demand"] = res_p2["firms_labor_demand"]  # Real hired
+        state["firms_wages_paid"] = res_p2[
+            "wages_paid_vector"
+        ]  # [FIX] Guardar salarios reales para Paso 5
 
         # Actualizar tasas FB donde hubo préstamos nuevos
         # res_p2['new_rates_FB'] vector (F,)
@@ -171,6 +174,9 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             state["firms_inventory"],
         )
         state["firms_production"] = produccion_real
+        state["firms_inventory"] = (
+            oferta_bienes  # [FIX CRITICAL] Add production to inventory
+        )
         state["labor_matrix"] = wages_matrix_FH
 
         # --- CORRECCIÓN STOCK-FLOW: PAGO DE SALARIOS A HOGARES ---
@@ -306,7 +312,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             "net_HF": consumption_matrix_HF,
             "net_HB": deposits_hb_matrix,
         }
-        
+
         # [FIX] Capture Transactions if available
         if "transactions" in res_p2 and res_p2["transactions"]:
             # Convert list of dicts to DataFrame

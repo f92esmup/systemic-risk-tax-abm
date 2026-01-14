@@ -94,10 +94,14 @@ def paso5(state, params):
     
     # Corrección: En paso2 calculamos 'wages_paid_vector'. Deberíamos haberlo inyectado en state.
     # Como paso2 devolvió un dict y en main hicimos update de varios keys, pero no de wages_paid_vector al state global.
-    # Calcularemos wages paid aproximados aquí:
-    wage_bill_est = state['firms_labor_demand'] * state['firms_wage']
+    # [FIX] Usar salarios reales si están disponibles en state (inyectados en main.py)
+    if 'firms_wages_paid' in state:
+        wage_bill_real = state['firms_wages_paid']
+    else:
+        # Fallback estimation
+        wage_bill_real = state['firms_labor_demand'] * state.get('firms_wage', 1.0)
     
-    costs_F = wage_bill_est + np.sum(interest_covered_matrix, axis=1)
+    costs_F = wage_bill_real + np.sum(interest_covered_matrix, axis=1)
     profits_F = Revenue_F - costs_F
     
     # Actualizar Equity

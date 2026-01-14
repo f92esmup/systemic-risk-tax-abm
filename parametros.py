@@ -1,66 +1,89 @@
 # parametros.py
 
-
 class Param:
     """
-    Parámetros del Modelo CRISIS / SRT
-    Valores extraídos de Table I del paper [cite: 713-736]
+    Parámetros del Modelo CRISIS / SRT - ESCALA REAL (EUROS)
+    Calibración: 1 Unidad de Tiempo = 1 Mes aprox.
+    Moneda: Euros (€)
     """
 
     # --- Dimensiones del Sistema ---
-    B = 20  # Número de Bancos [cite: 715]
-    F = 100  # Número de Empresas [cite: 718]
-    H = 1300  # Número de Hogares [cite: 720]
-    T = 500  # Pasos de tiempo de la simulación [cite: 258]
+    B = 20    # Bancos
+    F = 100   # Empresas
+    H = 1300  # Hogares
+    T = 500   # Tiempo
+
+    # --- FACTOR DE ESCALA (Solo para referencia mental) ---
+    # K = 2000. Si antes W=1.0, ahora W=2000.0
 
     # --- Parámetros Económicos ---
-    ALPHA = 0.1  # Productividad laboral [cite: 726]
-    W_BASE = 1.0  # Tasa salarial [cite: 732]
-    R_BAR = 0.02  # Tasa de interés de referencia (Refinancing rate) [cite: 724]
-    DIVIDEND_RATIO = 0.9  # Porcentaje de beneficios pagados en dividendos [cite: 722]
-    PROPENSION_CONSUMO = 0.8  # 'c' Propensity to consume [cite: 734]
+    ALPHA = 0.1          # Productividad (Físico: 1 trabajador produce 0.1 coches/mes)
+    W_BASE = 2200.0      # Salario Base Mensual en €
+    
+    # Precio Inicial: Margen sobre costes. 
+    # Coste laboral unitario = W / ALPHA = 2200 / 0.1 = 22,000 €
+    # Precio con margen = 24,000 €
+    PRECIO_INICIAL = 24000.0 
+    
+    R_BAR = 0.02         # Tasa de interés (2%)
+    DIVIDEND_RATIO = 0.2 # 20% de beneficios a dividendos
+    PROPENSION_CONSUMO = 0.8 # Gastan el 80% de su sueldo
 
     # --- Parámetros de Crédito y Deuda ---
-    TAU = 0.05  # Tasa de reembolso de deuda (Rate of debt reimbursement) [cite: 730]
-    PHI = 0.8  # Contracción de demanda de crédito si r > r_max [cite: 728]
-    R_MAX = 0.25  # [Tuning] Aumentado umbral para tolerar tasas más altas al inicio
+    TAU = 0.04           # Amortización de deuda (4% mensual)
+    PHI = 0.8            # Restricción de crédito
+    R_MAX = 0.25         # Tasa usura (>25%)
 
+    # --- Inicialización de Stocks (En Euros) ---
+    # Producción Física (Mantenemos escala pequeña para cantidades)
+    # L_demand ~ 13 trabajadores -> Producción ~ 1.3 unidades
+    PRODUCCION_INICIAL = 1.3 
+
+    # Stocks Financieros (Escalados x2000 respecto a versión anterior)
+    
+    # Equity Firmas: Colchón para no quebrar día 1.
+    EQUITY_INICIAL_FIRMAS = 40000.0 
+    
+    # Liquidez Firmas: Nómina de 1 mes aprox (13 emp * 2200€ = 28.600€)
+    # Les damos menos para obligarlas a pedir crédito.
+    LIQUIDEZ_INICIAL_FIRMAS = 5000.0 
+    
+    # Equity Bancos: Capital Base. Lo hacemos bajo para fragilidad.
+    # Antes 20.0 -> Ahora 40.000 €
+    EQUITY_INICIAL_BANCOS = 40000.0   
+    
+    # Liquidez Bancos: Dinero prestable. Escaso para forzar interbancario.
+    # Antes 20.0 -> Ahora 40.000 €
+    # [FIX] Aumentado a 150k para cubrir demanda de nóminas (2.8M total)
+    LIQUIDEZ_INICIAL_BANCOS = 150000.0 
+
+    # Depósitos Hogares: Ahorro inicial
+    DEPOSITOS_INICIALES_HOGARES = 100000.0 
 
     # --- Parámetros de Red y Búsqueda ---
-    N_BANCOS_CONTACTADOS = 5  # 'n' Number of applications in credit market [cite: 736]
-    Z_CONSUMO = 2  # 'z' Number of applications in consumption goods market [cite: 733]
+    N_BANCOS_CONTACTADOS = 5 
+    Z_CONSUMO = 2 
 
-    # --- Parámetros del Mercado de Crédito (Paso 2) ---
-    FACTOR_PROB_DEFAULT = 0.01  # Escalar para proxy de riesgo (Eq. A4)
-    RANGO_PSI = 0.1             # Variabilidad idiosincrática interbancaria (0 a 0.1)
-    DELTA_LOAN_TEST = 1.0       # Monto del préstamo hipotético para cálculo SRT
-    PROB_BAILOUT = 0.5          # Probabilidad de rescate (bailout) de firma [cite: Paper 2]
+    # --- Parámetros del Mercado de Crédito ---
+    FACTOR_PROB_DEFAULT = 0.01 
+    RANGO_PSI = 0.1            
+    
+    # [IMPORTANTE] El préstamo de test debe ser relevante en Euros
+    # Antes 1.0 -> Ahora 2000.0 € (Un micro-préstamo interbancario)
+    DELTA_LOAN_TEST = 2000.0       
+    
+    PROB_BAILOUT = 0.5          
 
-
-
-    # --- Parámetros de Ajuste Adaptativo (Paso 1) ---
-    # Rango de ajuste aleatorio para precios y cantidades (Greenwald-Stiglitz)
+    # --- Parámetros de Ajuste Adaptativo ---
     RANGO_AJUSTE_MIN = 0.01
     RANGO_AJUSTE_MAX = 0.02
     
-    # Parámetros de Estabilidad Numérica (Paso 1)
-    UMBRAL_INVENTARIO = 1e-4        # Nivel mínimo para considerar exceso de stock
-    SUELO_PRECIO_RELATIVO = 0.5     # Precio mínimo como fracción del promedio
-    SUELO_DEMANDA_RELATIVO = 0.1    # Demanda mínima como fracción del promedio
+    # Umbrales (Ajustados a la escala de Cantidad vs Precio)
+    # Inventario es FÍSICO (unidades), así que 1e-4 sigue bien.
+    UMBRAL_INVENTARIO = 1e-4        
+    SUELO_PRECIO_RELATIVO = 0.5     
+    SUELO_DEMANDA_RELATIVO = 0.1    
 
-    # --- Parámetros de Impuestos (Policy) ---
-    ZETA = 0.02  # Sensibilidad del impuesto SRT (o 1.0 para full pricing) [cite: 259]
-    TASA_TOBIN = 0.002  # 0.2% tasa fija [cite: 250]
-
-    # --- Inicialización (Valores Semilla) ---
-    PRECIO_INICIAL = 12.0  # Debe ser > W_BASE/ALPHA = 10.0
-    PRODUCCION_INICIAL = 1.3  # Ajustado: 1300H / 100F * ALPHA(0.1) = 1.3
-    EQUITY_INICIAL_FIRMAS = 20.0 # Reducido para aumentar fragilidad
-    LIQUIDEZ_INICIAL_FIRMAS = 5.0 # Forzar necesidad de crédito (Nómina ~13.0)
-
-
-    EQUITY_INICIAL_BANCOS = 60.0   
-    LIQUIDEZ_INICIAL_BANCOS = 60.0 # Ajustado para mismatch (Total 1200 > Demand ~800)
-
-    DEPOSITOS_INICIALES_HOGARES = 50.0
-
+    # --- Impuestos ---
+    ZETA = 0.02       # Sensibilidad SRT (Adimensional, no cambia)
+    TASA_TOBIN = 0.002 # 0.2% (Adimensional, no cambia)

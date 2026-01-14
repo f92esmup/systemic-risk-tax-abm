@@ -203,15 +203,19 @@ def paso2(state, params):
                 tax = 0.0
                 delta = 0.0
                 
-                # Always calculate delta for SRT mode to plot it, even if we don't tax it (unlikely case)
+                # [AUDIT FIX] Calculate Delta ALWAYS for statistics (Paper 1 Fig 3d)
+                # Even if we don't tax it, we want to know the risk generated.
+                # Use standard test loan size for consistent marginal risk measurement
+                amount_test = params.DELTA_LOAN_TEST 
+                if amount_test > available: amount_test = available # Cap at availability
+                
+                L_sim = L_BB.copy()
+                L_sim[i_global, j_global] += amount_test
+                H_new, _ = calcular_riesgo_sistemico_scalar(L_sim, Equity_B)
+                delta = max(0, H_new - H_current)
+                
                 if modo == 'SRT':
-                    amount_test = min(amount_needed, available)
-                    L_sim = L_BB.copy()
-                    L_sim[i_global, j_global] += amount_test
-                    H_new, _ = calcular_riesgo_sistemico_scalar(L_sim, Equity_B)
-                    delta = max(0, H_new - H_current)
                     tax = params.ZETA * delta
-                    
                 elif modo == 'TOBIN':
                     tax = params.TASA_TOBIN
                 
