@@ -12,11 +12,11 @@ def calcular_riesgo_sistemico_scalar(L, equity_banks):
     
     Returns:
         H (float): Nivel de riesgo sistémico escalar (0 a 1).
+        R (vector): Vector DebtRank.
     """
     B = len(equity_banks)
     
     # 1. Matriz de Impacto W_ij (Eq. D1)
-    # W_ij = min(1, L_ji / E_i) -> Impacto de j sobre i
     C_inv = np.zeros_like(equity_banks)
     mask_c = equity_banks > 0
     C_inv[mask_c] = 1.0 / equity_banks[mask_c]
@@ -28,23 +28,18 @@ def calcular_riesgo_sistemico_scalar(L, equity_banks):
     W = np.minimum(1.0, L_trans * C_inv[:, np.newaxis])
     
     # 2. Valor Económico v_i
-    # v_i = Total Assets Interbank_i / Total System Assets
-    # Assets de i = Sum_k L[k, i] (lo que otros deben a i)
     total_assets_per_bank = np.sum(L, axis=0) 
     total_val = np.sum(total_assets_per_bank)
     
     if total_val > 0:
         v = total_assets_per_bank / total_val
     else:
-        # Si no hay deuda, pesos uniformes o cero riesgo
         v = np.ones(B) / B
 
     # 3. DebtRank Vectorial R
     I = np.eye(B)
     try:
-        # M = (I - W)^-1
         M = np.linalg.inv(I - W) 
-        # R = v @ M
         R = v @ M
     except np.linalg.LinAlgError:
         R = v 
@@ -53,7 +48,7 @@ def calcular_riesgo_sistemico_scalar(L, equity_banks):
     
     # 4. Riesgo Escalar H
     H = np.sum(R * v)
-    return H, R  # Devolvemos también R por si se necesita reporting
+    return H, R
 
 def paso2(state, params):
     """
@@ -61,7 +56,7 @@ def paso2(state, params):
     
     1. Empresas piden crédito a N bancos aleatorios y eligen el mejor.
     2. Bancos evalúan liquidez.
-    3. Mercado Interbancario con SRT Marginal (Eq. 5).
+    3. Mercado Interbancario con SRT Marginal y muestreo aleatorio.
     """
     
     F = params.F
@@ -69,63 +64,49 @@ def paso2(state, params):
     
     # --- A. DESEMPAQUETAR ESTADO ---
     L_demand_F = state['firms_labor_demand'] 
-    
-    if 'firms_wage' in state:
-        W_wage = state['firms_wage']
-    else:
-        W_wage = np.full(F, params.W_BASE)
+    W_wage = state.get('firms_wage', np.full(F, params.W_BASE))
         
     Liq_F = state['firms_liquidity']
-    Equity_F = state['firms_equity'] # No se usa directamente en tasa, sino deuda/liq
-    
     Liq_B = state['banks_liquidity']
     Equity_B = state['banks_equity']
     
-    # Redes actuales
     L_FB = state['net_FB'] 
     L_BB = state['net_BB']
     
     
     # --- B. MERCADO DE CRÉDITO (FIRMS -> BANKS) ---
-    # [FIX] Selección Aleatoria de Bancos (Paper 1: "Contact random sample of n banks")
     
     # 1. Necesidad de Crédito
     payroll = L_demand_F * W_wage
-    credit_needed_F = np.maximum(0, payroll - Liq_F) # (F,)
+    credit_needed_F = np.maximum(0, payroll - Liq_F)
     
-    # 2. Fragilidad Financiera de Firmas (para Tasa)
-    # mu_i = tanh(Debt / (Liq + Debt))
+    # 2. Fragilidad Financiera de Firmas
     total_debt_F = np.sum(L_FB, axis=1)
     fragility_F = np.zeros(F)
     mask_pos = (Liq_F + total_debt_F) > 0
     fragility_F[mask_pos] = total_debt_F[mask_pos] / (Liq_F[mask_pos] + total_debt_F[mask_pos] + 1e-9)
-    mu_F = np.tanh(fragility_F) # (F,)
+    mu_F = np.tanh(fragility_F)
     
-    # 3. Muestreo de Bancos y Ofertas
+    # 3. Muestreo de Bancos (Sin duplicados por firma)
     N_CONTACTS = params.N_BANCOS_CONTACTADOS
     
-    # Generar N candidatos por firma: (F, N)
-    candidate_banks = np.random.randint(0, B, (F, N_CONTACTS))
+    # Para asegurar muestreo sin reemplazo por fila de forma vectorizada:
+    # Generamos permutaciones aleatorias para cada firma y tomamos los primeros N
+    perms = np.array([np.random.permutation(B) for _ in range(F)])
+    candidate_banks = perms[:, :N_CONTACTS] # (F, N)
     
-    # Generar especificidad chi para cada par (F, N): Uniforme(0, 0.1)
-    # chi_ik ~ U[0, 0.1]
+    # Especificidad chi
     chi_matrix = np.random.uniform(0, 0.1, (F, N_CONTACTS))
     
     # Calcular Tasas Ofertadas
-    # r_ik = r_bar * (1 + chi_ik * mu_i)
-    # mu_F necesita shape (F, 1) para broadcasting
     rates_offered = params.R_BAR * (1 + chi_matrix * mu_F[:, np.newaxis])
     
-    # 4. Selección del Mejor Banco (Menor Tasa)
-    best_idx_local = np.argmin(rates_offered, axis=1) # (F,) indices 0..N-1
-    
-    # Obtener el índice global del banco ganador y su tasa
-    # candidate_banks[i, best_idx_local[i]]
+    # 4. Selección del Mejor Banco
+    best_idx_local = np.argmin(rates_offered, axis=1)
     chosen_banks = candidate_banks[np.arange(F), best_idx_local]
     chosen_rates = rates_offered[np.arange(F), best_idx_local]
     
-    # 5. Toma de Crédito
-    # Aplicar restricción de demanda si tasa es muy alta (Elasticidad)
+    # 5. Toma de Crédito con Elasticidad
     mask_high_rate = chosen_rates > params.R_MAX
     credit_taken_F = credit_needed_F.copy()
     credit_taken_F[mask_high_rate] *= params.PHI
@@ -134,131 +115,97 @@ def paso2(state, params):
     Liq_F += credit_taken_F
     np.add.at(L_FB, (np.arange(F), chosen_banks), credit_taken_F)
     
-    # Impacto en Liquidez Bancaria
     withdrawals_per_bank = np.bincount(chosen_banks, weights=credit_taken_F, minlength=B)
     Liq_B -= withdrawals_per_bank
 
     
     # --- C. MERCADO INTERBANCARIO (BANKS -> BANKS) ---
     
-    # Identificar Déficit y Superávit
     deficit_B_mask = Liq_B < 0
-    surplus_B_mask = Liq_B > 0
-    
-    demand_IB = np.abs(Liq_B[deficit_B_mask])
-    supply_IB = Liq_B[surplus_B_mask]
-    
     idxs_deficit = np.where(deficit_B_mask)[0]
-    idxs_surplus = np.where(surplus_B_mask)[0]
+    idxs_surplus = np.where(Liq_B > 0)[0]
     
     tax_matrix = np.zeros((B, B)) 
-    delta_el_matrix = np.zeros((B, B))
 
     if len(idxs_deficit) > 0 and len(idxs_surplus) > 0:
         
-        # Calcular Riesgo Sistémico Inicial H(L)
         H_current, _ = calcular_riesgo_sistemico_scalar(L_BB, Equity_B)
         
-        # Pre-calcular factores de tasa base para interbancario
-        # r_ij = r_bar * (1 + psi_j * mu_i)
-        # mu_i = tanh(Leverage_i) del PRESTATARIO (Deficit)
+        # Fragilidad del Borrower (i)
         leverage_B = np.zeros(B)
-        mask_eq = Equity_B > 0
         total_liab_IB = np.sum(L_BB, axis=1)
+        mask_eq = Equity_B > 0
         leverage_B[mask_eq] = total_liab_IB[mask_eq] / Equity_B[mask_eq]
         mu_B = np.tanh(leverage_B)
         
-        # Psi (especificidad) del PRESTAMISTA
+        # Psi (especificidad) del Lender
         psi_B = np.random.uniform(0, params.RANGO_PSI, B)
         
         modo = getattr(params, 'MODO_IMPUESTO', 'NINGUNO')
         
-        supply_remaining = supply_IB.copy()
-        
-        # Iterar sobre Bancos con Déficit (Borrowers)
-        for i_local, i_global in enumerate(idxs_deficit):
-            amount_needed = demand_IB[i_local]
+        # Iterar sobre Bancos con Déficit
+        for i_global in idxs_deficit:
+            amount_needed = abs(Liq_B[i_global])
             if amount_needed < 1e-9: continue
+            
+            # [AUDIT FIX] Muestreo aleatorio en el interbancario
+            # El banco con déficit solo contacta a N bancos con superávit
+            num_surplus = len(idxs_surplus)
+            n_contacts_ib = min(num_surplus, params.N_BANCOS_CONTACTADOS)
+            
+            # Seleccionar muestra aleatoria de bancos con superávit
+            sampled_j_locals = np.random.choice(num_surplus, n_contacts_ib, replace=False)
+            sampled_j_globals = idxs_surplus[sampled_j_locals]
             
             offers = []
             
-            # Evaluar ofertas de Bancos con Superávit (Lenders)
-            for j_local, j_global in enumerate(idxs_surplus):
-                if supply_remaining[j_local] <= 1e-9: continue
+            for j_global in sampled_j_globals:
+                available = Liq_B[j_global]
+                if available <= 1e-9: continue
                 
-                # 1. Tasa de Interés
+                # 1. Tasa Base
                 r_offer = params.R_BAR * (1 + psi_B[j_global] * mu_B[i_global])
                 
-                # 2. Impuesto (SRT Marginal o Tobin)
+                # 2. Impuesto Marginal
                 tax = 0.0
                 if modo == 'SRT':
-                    # [FIX] Cálculo Marginal de SRT: Zeta * (H(L_new) - H(L_old))
-                    # Simular préstamo temporal
-                    amount_test = min(amount_needed, supply_remaining[j_local])
-                    # Usamos un monto fijo de test o el real? Paper dice "marginal loan".
-                    # Usaremos el monto real estimado para exactitud o 1.0 unitario.
-                    # Poledna: "Impact of a NEW transaction". Usaremos el monto real.
-                    
-                    # Copia ligera para simulación (solo cambia un elemento)
-                    # Optimización: No copiar toda la matriz si es lenta, pero 20x20 es trivial.
+                    amount_test = min(amount_needed, available)
                     L_sim = L_BB.copy()
                     L_sim[i_global, j_global] += amount_test
-                    
                     H_new, _ = calcular_riesgo_sistemico_scalar(L_sim, Equity_B)
-                    
-                    delta_H = max(0, H_new - H_current) # No hay tax negativo
-                    tax = params.ZETA * delta_H
-                    
+                    tax = params.ZETA * max(0, H_new - H_current)
                 elif modo == 'TOBIN':
                     tax = params.TASA_TOBIN
                 
-                total_cost = r_offer + tax
-                
                 offers.append({
-                    'j_local': j_local,
                     'j_global': j_global,
-                    'rate': r_offer,
-                    'tax': tax,
-                    'total_cost': total_cost,
-                    'available': supply_remaining[j_local]
+                    'total_cost': r_offer + tax,
+                    'tax': tax
                 })
             
-            # Ordenar por menor costo total
+            # Ordenar y ejecutar
             offers.sort(key=lambda x: x['total_cost'])
             
-            # Tomar préstamos
             took_total = 0
             for off in offers:
-                j_local = off['j_local']
-                j_global = off['j_global']
-                available = supply_remaining[j_local]
-                
+                j_glob = off['j_global']
+                available = Liq_B[j_glob]
                 if available <= 0: continue
                 
                 amount = min(amount_needed - took_total, available)
                 
-                # Ejecutar
-                supply_remaining[j_local] -= amount
-                took_total += amount
-                
-                L_BB[i_global, j_global] += amount
+                L_BB[i_global, j_glob] += amount
                 Liq_B[i_global] += amount
-                Liq_B[j_global] -= amount
+                Liq_B[j_glob] -= amount
+                tax_matrix[i_global, j_glob] = off['tax']
                 
-                # Guardar Tax para reporting
-                tax_matrix[i_global, j_global] = off['tax']
-                
-                # Actualizar H_current para la siguiente transacción?
-                # Poledna: "Transactions are executed sequentially". Sí, se actualiza.
                 if modo == 'SRT' and amount > 0:
                      H_current, _ = calcular_riesgo_sistemico_scalar(L_BB, Equity_B)
 
-                if took_total >= amount_needed - 1e-9:
-                    break
+                took_total += amount
+                if took_total >= amount_needed - 1e-9: break
     
-    # --- D. ACTUALIZAR SALARIOS Y RETORNO ---
-    # Pago de salarios con la liquidez final (reducida si no consiguieron crédito)
-    # Se limita contratación a lo que se puede pagar
+    # --- D. ACTUALIZAR SALARIOS ---
     payroll_possible = Liq_F
     L_hired_F = np.minimum(L_demand_F, np.floor(payroll_possible / W_wage))
     wages_paid = L_hired_F * W_wage
@@ -273,14 +220,9 @@ def paso2(state, params):
         'wages_paid_vector': wages_paid,
         'tax_matrix': tax_matrix,
         'new_rates_FB': chosen_rates,
-        'bank_indices': chosen_banks, # [FIX] Return chosen banks indices
-        'delta_el': delta_el_matrix # Placeholder, no calculado marginalmente para todo par
+        'bank_indices': chosen_banks
     }
 
 def calcular_debtrank_vector(L, equity_banks, v_sys=None):
-    """
-    Wrapper de compatibilidad para calcular el vector DebtRank.
-    Usa la lógica optimizada de calcular_riesgo_sistemico_scalar.
-    """
     _, R = calcular_riesgo_sistemico_scalar(L, equity_banks)
     return R
