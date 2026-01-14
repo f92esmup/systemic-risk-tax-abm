@@ -256,18 +256,19 @@ def paso2(state, params):
                 # d. EL Nuevo
                 EL_new = np.sum(p_default_new * R_new)
                 
-                # Delta Expected Loss
-                delta = max(0, EL_new - EL_loop)
+                # [AUDIT FIX] Delta EL Monetario (Ec. 3 Paper 1)
+                # EL_monetary = EL_adimensional * V_total
+                EL_monetary_loop = EL_loop * total_sys_loop
+                EL_monetary_new = EL_new * total_sys_new
+                
+                delta_monetary = max(0, EL_monetary_new - EL_monetary_loop)
                 
                 if modo == 'SRT':
                     # [AUDIT FIX] Dimensionalidad del Impuesto
-                    # SRT (Monto) = Zeta * Delta_EL * Total_System_Volume
                     # Tax Rate = SRT (Monto) / Loan_Amount
                     
-                    # 1. Desnormalizar Delta EL (Adimensional -> Euros)
-                    delta_monetary = delta * total_sys_loop
-                    
                     # 2. Calcular Monto del Impuesto
+                    # ZETA es 1.0 (Full Internalization) -> Tax = Delta EL Monetario
                     tax_amount = params.ZETA * delta_monetary
                     
                     # 3. Convertir a Tasa
@@ -280,7 +281,7 @@ def paso2(state, params):
                     'j_global': j_global,
                     'total_cost': r_offer + tax_rate,
                     'tax': tax_rate, # This is now a rate
-                    'delta': delta 
+                    'delta': delta_monetary # Store monetary delta for stats
                 })
             
             # Ordenar y ejecutar

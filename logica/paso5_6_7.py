@@ -252,9 +252,10 @@ def paso5(state, params):
         
         # Limpiar pasivos del fallido (ya impactados)
         L_BB[failed_idx, :] = 0
-        # Limpiar activos del fallido? (Nadie le paga? O cobra para liquidar?)
-        # Simplificación: Sus activos desaparecen o se congelan.
-        L_BB[:, failed_idx] = 0 
+        # [AUDIT FIX] NO limpiar activos del fallido. 
+        # Si borramos L_BB[:, failed_idx], perdonamos la deuda a quienes le debían al banco quebrado.
+        # Esos activos deben seguir existiendo (aunque congelados).
+        # L_BB[:, failed_idx] = 0  <-- ELIMINADO 
     
     # 5. NO RENACIMIENTO
     # Los bancos quebrados quedan con Eq < 0. No hacemos reset.

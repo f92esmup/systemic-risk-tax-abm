@@ -133,13 +133,55 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     initial_loans_FB[np.arange(F), init_banks_F] = amount_vec_FB
     state["net_FB"] = initial_loans_FB
 
-    # [NEW] Initialize Interbank Network (BB) - También escalado
+    # [NEW] Initialize Interbank Network (BB) - Scale-Free (Barabási-Albert like)
+    # Paper 1 uses empirical or scale-free networks. Random is too homogeneous.
     initial_loans_BB = np.zeros((B, B))
-    for b in range(B):
-        lenders = rng.choice([i for i in range(B) if i != b], 2, replace=False)
-        # Préstamo ~ 20% del equity del banco prestatario
-        loan_size = equity_banks_vec[b] * 0.2 
-        initial_loans_BB[b, lenders] = loan_size / 2.0 
+    
+    # 1. Create a core of connected banks (first m banks fully connected)
+    m = 2 # Links per new node
+    if B > m:
+        for i in range(m):
+            for j in range(m):
+                if i != j:
+                    loan_size = equity_banks_vec[i] * 0.1 # Small initial loans
+                    initial_loans_BB[i, j] = loan_size
+    
+        # 2. Add remaining banks with preferential attachment (incoming links ~ degree)
+        # We use in-degree (who has many lenders) as proxy for "prominence" or simply random + degree
+        # For simplicity in directed graph: attach to nodes with high total degree (in + out)
+        
+        for i in range(m, B):
+            # Calculate probabilities based on current degree (sum of binary connections)
+            adjacency = (initial_loans_BB > 0).astype(int)
+            degrees = np.sum(adjacency, axis=0) + np.sum(adjacency, axis=1) # Total degree
+            total_degree = np.sum(degrees)
+            
+            if total_degree == 0:
+                probs = np.ones(B) / B
+            else:
+                probs = degrees / total_degree
+            
+            # Select m targets to lend TO (i becomes creditor? or debtor?)
+            # Usually new entrants borrow from hubs. Let's say i borrows from existing hubs.
+            # So i is Debtor (Row), Hubs are Creditors (Col).
+            
+            # Sample m unique targets from existing nodes 0..B-1 (but probs only non-zero for 0..i-1 typically?)
+            # Barabasi usually grows. Here we just pick from all, weighted by current degree.
+            # Mask self
+            probs[i] = 0
+            norm = np.sum(probs)
+            if norm > 0:
+                probs /= norm
+            else:
+                probs = np.ones(B) / B; probs[i]=0; probs /= np.sum(probs)
+                
+            targets = rng.choice(np.arange(B), size=m, replace=False, p=probs)
+            
+            for t in targets:
+                # i borrows from t
+                loan_size = equity_banks_vec[i] * 0.2 
+                initial_loans_BB[i, t] = loan_size
+                
     state["net_BB"] = initial_loans_BB
 
     # Adjust liquidity (Loan proceeds/disbursements)
