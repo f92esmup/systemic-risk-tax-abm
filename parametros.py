@@ -17,7 +17,7 @@ class Param:
     ALPHA = 0.1  # Productividad laboral [cite: 726]
     W_BASE = 1.0  # Tasa salarial [cite: 732]
     R_BAR = 0.02  # Tasa de interés de referencia (Refinancing rate) [cite: 724]
-    DIVIDEND_RATIO = 0.2  # Porcentaje de beneficios pagados en dividendos [cite: 722]
+    DIVIDEND_RATIO = 0.9  # Porcentaje de beneficios pagados en dividendos [cite: 722]
     PROPENSION_CONSUMO = 0.8  # 'c' Propensity to consume [cite: 734]
 
     # --- Parámetros de Crédito y Deuda ---
@@ -55,12 +55,12 @@ class Param:
     # --- Inicialización (Valores Semilla) ---
     PRECIO_INICIAL = 12.0  # Debe ser > W_BASE/ALPHA = 10.0
     PRODUCCION_INICIAL = 1.3  # Ajustado: 1300H / 100F * ALPHA(0.1) = 1.3
-    EQUITY_INICIAL_FIRMAS = 100.0 # Aumentado para absorber choques iniciales
-    LIQUIDEZ_INICIAL_FIRMAS = 100.0
+    EQUITY_INICIAL_FIRMAS = 20.0 # Reducido para aumentar fragilidad
+    LIQUIDEZ_INICIAL_FIRMAS = 5.0 # Forzar necesidad de crédito (Nómina ~13.0)
 
 
-    EQUITY_INICIAL_BANCOS = 5000.0   
-    LIQUIDEZ_INICIAL_BANCOS = 5000.0 
+    EQUITY_INICIAL_BANCOS = 60.0   
+    LIQUIDEZ_INICIAL_BANCOS = 60.0 # Ajustado para mismatch (Total 1200 > Demand ~800)
 
     DEPOSITOS_INICIALES_HOGARES = 50.0
 

@@ -185,6 +185,17 @@ def paso5(state, params):
     
     Eq_B += profits_B
     
+    # [FIX] Bank Dividends to prevent infinite accumulation
+    div_mask_B = (Eq_B > 0) & (profits_B > 0)
+    dividends_B = np.zeros(B)
+    dividends_B[div_mask_B] = profits_B[div_mask_B] * params.DIVIDEND_RATIO
+    
+    Eq_B -= dividends_B
+    Liq_B -= dividends_B
+    
+    # Add to total dividends for households
+    dividends_total_val = np.sum(dividends) + np.sum(dividends_B)
+    
     # 4. CASCADA DE QUIEBRAS BANCARIAS (Contagio)
     # "Si un banco quiebra, no renace, tampoco los afectados"
     
@@ -253,7 +264,7 @@ def paso5(state, params):
         'net_BB': L_BB,
         'bankruptcies_F': np.sum(bankrupt_F_mask),
         'bankruptcies_B': np.sum(bankrupt_B_mask),
-        'dividends_total': np.sum(dividends),
+        'dividends_total': dividends_total_val,
         'contagion_loss': total_losses_contagion,
         'mask_bankrupt_F': bankrupt_F_mask # NEW
     }

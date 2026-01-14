@@ -3,53 +3,78 @@ from parametros import Param as p
 
 def calcular_riesgo_sistemico_scalar(L, equity_banks):
     """
-    Calcula el Riesgo Sistémico Total H(L) del sistema bancario.
-    H = Sum(R_i * v_i)
+    Calcula el Riesgo Sistémico Total H(L) del sistema bancario usando algoritmo iterativo.
+    Implementa la lógica de DebtRank (Poledna & Thurner 2016).
     
     Args:
         L (matrix): Matriz de Pasivos Interbancarios (B, B). L[i, j] es lo que i debe a j.
+                    (Fila=Deudor, Columna=Acreedor/Prestamista)
         equity_banks (vector): Capital de los bancos (B,).
     
     Returns:
         H (float): Nivel de riesgo sistémico escalar (0 a 1).
-        R (vector): Vector DebtRank.
+        R (vector): Vector DebtRank (impacto de cada banco).
     """
     B = len(equity_banks)
+    T_steps_debtrank = 100 # Máximo pasos de propagación
     
-    # 1. Matriz de Impacto W_ij (Eq. D1)
-    C_inv = np.zeros_like(equity_banks)
-    mask_c = equity_banks > 0
-    C_inv[mask_c] = 1.0 / equity_banks[mask_c]
+    # 1. Matriz de Impacto W_ij (Eq. D1 del Paper 1)
+    # W[j, i] debe ser el impacto sobre j (Acreedor) causado por el default de i (Deudor).
+    # Fórmula Paper: W_ji = min(1, A_ji / E_j) donde A_ji es lo que i debe a j.
+    # En nuestra matriz L: L[i, j] es lo que i debe a j.
+    # Por tanto: W[j, i] = min(1, L[i, j] / E_j)
     
-    # L[j, i] es lo que j debe a i.
-    L_trans = L.T 
+    equity_safe = np.where(equity_banks <= 0, 1e-10, equity_banks)
     
-    # W[i, j] = L_trans[i, j] * C_inv[i]
-    W = np.minimum(1.0, L_trans * C_inv[:, np.newaxis])
+    # División: L / E_j (donde E_j varía por columnas en L)
+    # L_scaled[i, j] = L[i, j] / E_j
+    L_scaled = L / equity_safe[np.newaxis, :]
     
-    # 2. Valor Económico v_i
-    # [AUDIT V3 FIX] Weigh by liabilities (axis=1) instead of assets (axis=0)
-    # v_i = Total Liabilities Interbank_i / Total System Liabilities
+    # W[j, i] es la transpuesta de L_scaled
+    # W[j, i] = L_scaled[i, j] = L[i, j] / E_j
+    W = np.minimum(1.0, L_scaled.T)
+    
+    # 2. Valor Económico v_i (Eq. D2 del Paper 1)
+    # "Given the total outstanding interbank liabilities of bank i..."
+    # v_i = Total pasivos de i / Total pasivos del sistema
+    # L[i, :] son las deudas de i. Sum(L, axis=1) es el total pasivo de i.
     total_liabilities_per_bank = np.sum(L, axis=1) 
     total_val = np.sum(total_liabilities_per_bank)
     
     if total_val > 0:
         v = total_liabilities_per_bank / total_val
     else:
-        v = np.ones(B) / B
+        v = np.zeros(B)
 
-    # 3. DebtRank Vectorial R
-    I = np.eye(B)
-    try:
-        M = np.linalg.inv(I - W) 
-        R = v @ M
-    except np.linalg.LinAlgError:
-        R = v 
-        
-    R = np.clip(R, 0, 1)
+    # 3. DebtRank Vectorial R (Iterativo)
+    # R_i = Impacto económico total si banco i entra en default
+    R = np.zeros(B)
     
-    # 4. Riesgo Escalar H
+    for i in range(B):
+        # Estado inicial: banco i en default
+        h = np.zeros(B)
+        h[i] = 1.0 # PSI_i = 1 (Default inicial)
+        last_h = np.zeros(B)
+        
+        # Propagación dinámica (solo el incremento de distress se propaga)
+        for _ in range(T_steps_debtrank):
+            diff = h - last_h
+            if np.sum(diff) < 1e-6:
+                break
+            
+            last_h = h.copy()
+            # Impacto en j (Acreedor) = Sum_k W[j, k] * diff_k (Deudor)
+            impact = W @ diff
+            h = np.minimum(1.0, h + impact)
+        
+        # R_i = Suma ponderada del distress final en el sistema
+        # Paper 1 Eq D5 (aprox): R_i = Sum(h_j * v_j) - (contribución propia inicial excluida a veces, aquí completa)
+        R[i] = np.sum(h * v)
+        
+    # 4. Riesgo Escalar H (Eq. 5 del Paper 1)
+    # H es el DebtRank promedio ponderado por importancia económica
     H = np.sum(R * v)
+    
     return H, R
 
 def paso2(state, params):
