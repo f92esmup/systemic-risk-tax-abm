@@ -3,5 +3,6 @@ __pycache__/
 *.png
 *.npz
 output_data/
+*.gift
 test_*.py
 output*/
