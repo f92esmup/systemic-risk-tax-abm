@@ -215,7 +215,7 @@ def paso2(state, params):
             p_default_loop = factor_pd * np.tanh(leverage_loop)
             
             # 4. EL Actual
-            EL_loop = np.sum(p_default_loop * v_loop * R_loop)
+            EL_loop = np.sum(p_default_loop * R_loop)
 
             offers = []
             
@@ -254,7 +254,7 @@ def paso2(state, params):
                 p_default_new = factor_pd * np.tanh(leverage_new)
                 
                 # d. EL Nuevo
-                EL_new = np.sum(p_default_new * v_new * R_new)
+                EL_new = np.sum(p_default_new * R_new)
                 
                 # Delta Expected Loss
                 delta = max(0, EL_new - EL_loop)

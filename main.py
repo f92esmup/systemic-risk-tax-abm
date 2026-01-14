@@ -205,10 +205,11 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             }
 
         # Calcular DebtRank (Reporting)
-        total_lending = np.sum(state["net_BB"], axis=0)
-        V_total = np.sum(total_lending)
+        # [AUDIT FIX] v debe basarse en Pasivos (Liabilities), que son la suma por filas (axis=1)
+        total_liabilities = np.sum(state["net_BB"], axis=1)
+        V_total = np.sum(total_liabilities)
         if V_total > 1e-6:
-            v_sys = total_lending / V_total
+            v_sys = total_liabilities / V_total
             dr_vector = calcular_debtrank_vector(
                 state["net_BB"], state["banks_equity"], v_sys
             )
