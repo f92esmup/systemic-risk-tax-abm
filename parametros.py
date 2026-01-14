@@ -17,17 +17,17 @@ class Param:
     # K = 2000. Si antes W=1.0, ahora W=2000.0
 
     # --- Parámetros Económicos ---
-    ALPHA = 0.1          # Productividad (Físico: 1 trabajador produce 0.1 coches/mes)
+    ALPHA = 0.25         # Productividad (Físico: 1 trabajador produce 0.25 coches/mes)
     W_BASE = 2200.0      # Salario Base Mensual en €
     
     # Precio Inicial: Margen sobre costes. 
-    # Coste laboral unitario = W / ALPHA = 2200 / 0.1 = 22,000 €
-    # Precio con margen = 24,000 €
+    # Coste laboral unitario = W / ALPHA = 2200 / 0.25 = 8,800 €
+    # Precio con margen = 24,000 € (Margen MASIVO para robustez extrema)
     PRECIO_INICIAL = 24000.0 
     
-    R_BAR = 0.02         # Tasa de interés (2%)
-    DIVIDEND_RATIO = 0.2 # 20% de beneficios a dividendos
-    PROPENSION_CONSUMO = 0.8 # Gastan el 80% de su sueldo
+    R_BAR = 0.001        # Tasa de interés (0.1% mensual)
+    DIVIDEND_RATIO = 0.05 # 5% de beneficios a dividendos (Retención de capital)
+    PROPENSION_CONSUMO = 0.95 # Gastan el 95% de su sueldo
 
     # --- Parámetros de Crédito y Deuda ---
     TAU = 0.04           # Amortización de deuda (4% mensual)
@@ -53,9 +53,8 @@ class Param:
     EQUITY_INICIAL_BANCOS = 40000.0   
     
     # Liquidez Bancos: Dinero prestable. Escaso para forzar interbancario.
-    # Antes 20.0 -> Ahora 40.000 €
-    # [FIX] Aumentado a 300k para cubrir demanda de nóminas (2.8M total)
-    LIQUIDEZ_INICIAL_BANCOS = 300000.0 
+    # Aumentado a 50k para sostener ciclos largos (t>200).
+    LIQUIDEZ_INICIAL_BANCOS = 50000.0 
 
     # Depósitos Hogares: Ahorro inicial
     DEPOSITOS_INICIALES_HOGARES = 100000.0 

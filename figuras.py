@@ -88,11 +88,15 @@ def load_simulation_data(data_dir=DATA_DIR):
         if os.path.exists(banks_path):
             banks_df = pd.read_parquet(banks_path)
             if "t" in banks_df.columns and "dr" in banks_df.columns:
-                last_t = banks_df["t"].max()
-                # Get data for last step
-                final_banks = banks_df[banks_df["t"] == last_t]
+                max_t = banks_df["t"].max()
+                # [AUDIT FIX] Tomar un paso intermedio estable, o el promedio de los últimos 50 pasos
+                target_t = max(0, max_t - 10) 
+                
+                final_banks = banks_df[banks_df["t"] == target_t]
+                
                 # Extract DebtRank vector
-                results[mode]["debtrank_profiles"].append(final_banks["dr"].values)
+                if not final_banks.empty:
+                    results[mode]["debtrank_profiles"].append(final_banks["dr"].values)
 
         # --- 3. SRT Scatter (Delta EL vs Loan Size) ---
         trans_path = os.path.join(full_run_path, "transactions.parquet")

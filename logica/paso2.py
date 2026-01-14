@@ -132,6 +132,12 @@ def paso2(state, params):
     
     # Calcular Tasas Ofertadas
     rates_offered = params.R_BAR * (1 + chi_matrix * mu_F[:, np.newaxis])
+
+    # [AUDIT FIX] Solo bancos solventes pueden ser contactados (Credit Market)
+    solvent_banks_mask = Equity_B > 0
+    # Si un banco candidato está quebrado, su tasa es infinita
+    is_solvent_chosen = solvent_banks_mask[candidate_banks]
+    rates_offered[~is_solvent_chosen] = 1e9
     
     # 4. Selección del Mejor Banco
     best_idx_local = np.argmin(rates_offered, axis=1)
@@ -154,15 +160,18 @@ def paso2(state, params):
     # --- C. MERCADO INTERBANCARIO (BANKS -> BANKS) ---
     
     deficit_B_mask = Liq_B < 0
+    # [AUDIT FIX] Solo bancos solventes pueden prestar (Surplus y Equity > 0)
+    surplus_B_mask = (Liq_B > 0) & (Equity_B > 0)
+
     idxs_deficit = np.where(deficit_B_mask)[0]
-    idxs_surplus = np.where(Liq_B > 0)[0]
+    idxs_surplus = np.where(surplus_B_mask)[0]
     
     tax_matrix = np.zeros((B, B)) 
     transactions_list = [] # [FIX] Lista para guardar metadatos de transacciones
 
     if len(idxs_deficit) > 0 and len(idxs_surplus) > 0:
         
-        H_current, _ = calcular_riesgo_sistemico_scalar(L_BB, Equity_B)
+        # H_current se calcula localmente dentro del loop para precision
         
         # Fragilidad del Borrower (i)
         leverage_B = np.zeros(B)
@@ -190,6 +199,9 @@ def paso2(state, params):
             sampled_j_locals = np.random.choice(num_surplus, n_contacts_ib, replace=False)
             sampled_j_globals = idxs_surplus[sampled_j_locals]
             
+            # [AUDIT FIX] Calcular H_current REAL para este momento del bucle
+            H_current_loop, _ = calcular_riesgo_sistemico_scalar(L_BB, Equity_B)
+
             offers = []
             
             for j_global in sampled_j_globals:
@@ -212,7 +224,9 @@ def paso2(state, params):
                 L_sim = L_BB.copy()
                 L_sim[i_global, j_global] += amount_test
                 H_new, _ = calcular_riesgo_sistemico_scalar(L_sim, Equity_B)
-                delta = max(0, H_new - H_current)
+                
+                # [AUDIT FIX] Usar H_current_loop actualizado
+                delta = max(0, H_new - H_current_loop)
                 
                 if modo == 'SRT':
                     tax = params.ZETA * delta
@@ -252,8 +266,8 @@ def paso2(state, params):
                         'tax': float(off['tax'])
                     })
 
-                if modo == 'SRT' and amount > 0:
-                     H_current, _ = calcular_riesgo_sistemico_scalar(L_BB, Equity_B)
+                # NO es necesario recalcular H_current aquí para el modo SRT, 
+                # porque lo recalculamos al inicio del bucle `i_global`.
 
                 took_total += amount
                 if took_total >= amount_needed - 1e-9: break
