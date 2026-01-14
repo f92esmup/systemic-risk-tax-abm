@@ -54,8 +54,8 @@ class Param:
     
     # Liquidez Bancos: Dinero prestable. Escaso para forzar interbancario.
     # Antes 20.0 -> Ahora 40.000 €
-    # [FIX] Aumentado a 150k para cubrir demanda de nóminas (2.8M total)
-    LIQUIDEZ_INICIAL_BANCOS = 150000.0 
+    # [FIX] Aumentado a 150k para cubrir demanda de nóminas (2.8M total) -> Reducido a 30k para forzar IB
+    LIQUIDEZ_INICIAL_BANCOS = 30000.0 
 
     # Depósitos Hogares: Ahorro inicial
     DEPOSITOS_INICIALES_HOGARES = 100000.0 

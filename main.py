@@ -222,6 +222,11 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         # Reset de Tasas FB para empresas que murieron (y renacieron)
         state["rates_FB"][state["mask_renacidas"], :] = 0.0
 
+        # Stop condition: All banks insolvent
+        if np.sum(state["banks_equity"] > 0) == 0:
+            print(f"Colapso total del sistema bancario en t={t}. Deteniendo simulación.")
+            break
+
         # Registro Aggregado
         total_quiebras_B = res_p5["bankruptcies_B"]
         total_losses_contagion = res_p5["contagion_loss"]
