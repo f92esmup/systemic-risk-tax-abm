@@ -90,10 +90,11 @@ def paso2(state, params):
     # 3. Muestreo de Bancos (Sin duplicados por firma)
     N_CONTACTS = params.N_BANCOS_CONTACTADOS
     
-    # Para asegurar muestreo sin reemplazo por fila de forma vectorizada:
-    # Generamos permutaciones aleatorias para cada firma y tomamos los primeros N
-    perms = np.array([np.random.permutation(B) for _ in range(F)])
-    candidate_banks = perms[:, :N_CONTACTS] # (F, N)
+    # [AUDIT FIX] Vectorized random sampling without replacement (efficient)
+    # Generate random noise matrix (F, B) and argsort to get random indices
+    rng = np.random.default_rng()
+    rand_matrix = rng.random((F, B))
+    candidate_banks = np.argsort(rand_matrix, axis=1)[:, :N_CONTACTS]
     
     # Especificidad chi
     chi_matrix = np.random.uniform(0, 0.1, (F, N_CONTACTS))
