@@ -87,7 +87,7 @@ def paso2(state, params):
     
     1. Empresas piden crédito a N bancos aleatorios y eligen el mejor.
     2. Bancos evalúan liquidez.
-    3. Mercado Interbancario con SRT Marginal y muestreo aleatorio.
+    3. Mercado Interbancario con SRT Marginal basado en Expected Systemic Loss (EL).
     """
     
     F = params.F
@@ -121,8 +121,7 @@ def paso2(state, params):
     # 3. Muestreo de Bancos (Sin duplicados por firma)
     N_CONTACTS = params.N_BANCOS_CONTACTADOS
     
-    # [AUDIT FIX] Vectorized random sampling without replacement (efficient)
-    # Generate random noise matrix (F, B) and argsort to get random indices
+    # Vectorized random sampling without replacement (efficient)
     rng = np.random.default_rng()
     rand_matrix = rng.random((F, B))
     candidate_banks = np.argsort(rand_matrix, axis=1)[:, :N_CONTACTS]
@@ -133,7 +132,7 @@ def paso2(state, params):
     # Calcular Tasas Ofertadas
     rates_offered = params.R_BAR * (1 + chi_matrix * mu_F[:, np.newaxis])
 
-    # [AUDIT FIX] Solo bancos solventes pueden ser contactados (Credit Market)
+    # Solo bancos solventes pueden ser contactados (Credit Market)
     solvent_banks_mask = Equity_B > 0
     # Si un banco candidato está quebrado, su tasa es infinita
     is_solvent_chosen = solvent_banks_mask[candidate_banks]
@@ -160,20 +159,22 @@ def paso2(state, params):
     # --- C. MERCADO INTERBANCARIO (BANKS -> BANKS) ---
     
     deficit_B_mask = Liq_B < 0
-    # [AUDIT FIX] Solo bancos solventes pueden prestar (Surplus y Equity > 0)
+    # Solo bancos solventes pueden prestar (Surplus y Equity > 0)
     surplus_B_mask = (Liq_B > 0) & (Equity_B > 0)
 
     idxs_deficit = np.where(deficit_B_mask)[0]
     idxs_surplus = np.where(surplus_B_mask)[0]
     
     tax_matrix = np.zeros((B, B)) 
-    transactions_list = [] # [FIX] Lista para guardar metadatos de transacciones
+    transactions_list = [] 
 
     if len(idxs_deficit) > 0 and len(idxs_surplus) > 0:
         
-        # H_current se calcula localmente dentro del loop para precision
+        # Factor para probabilidad de default (Eq. 5 Paper 1)
+        factor_pd = getattr(params, 'FACTOR_PROB_DEFAULT', 0.01)
+        safe_equity = np.maximum(Equity_B, 1e-9)
         
-        # Fragilidad del Borrower (i)
+        # Fragilidad del Borrower (i) para tasas
         leverage_B = np.zeros(B)
         total_liab_IB = np.sum(L_BB, axis=1)
         mask_eq = Equity_B > 0
@@ -190,17 +191,31 @@ def paso2(state, params):
             amount_needed = abs(Liq_B[i_global])
             if amount_needed < 1e-9: continue
             
-            # [AUDIT FIX] Muestreo aleatorio en el interbancario
-            # El banco con déficit solo contacta a N bancos con superávit
+            # Muestreo aleatorio en el interbancario
             num_surplus = len(idxs_surplus)
             n_contacts_ib = min(num_surplus, params.N_BANCOS_CONTACTADOS)
             
-            # Seleccionar muestra aleatoria de bancos con superávit
             sampled_j_locals = np.random.choice(num_surplus, n_contacts_ib, replace=False)
             sampled_j_globals = idxs_surplus[sampled_j_locals]
             
-            # [AUDIT FIX] Calcular H_current REAL para este momento del bucle
-            H_current_loop, _ = calcular_riesgo_sistemico_scalar(L_BB, Equity_B)
+            # [AUDIT FIX] Calcular Expected Systemic Loss (EL) BASE para el bucle actual
+            # 1. Estado Actual de la Red (Recalculado por si hubo cambios)
+            H_loop, R_loop = calcular_riesgo_sistemico_scalar(L_BB, Equity_B)
+            
+            # 2. Vector v (Importancia Económica)
+            total_liab_loop = np.sum(L_BB, axis=1)
+            total_sys_loop = np.sum(total_liab_loop)
+            v_loop = np.zeros(B)
+            if total_sys_loop > 0:
+                v_loop = total_liab_loop / total_sys_loop
+            
+            # 3. Vector p_default (Probabilidad de Default)
+            # Proxy: tanh(Leverage)
+            leverage_loop = total_liab_loop / safe_equity
+            p_default_loop = factor_pd * np.tanh(leverage_loop)
+            
+            # 4. EL Actual
+            EL_loop = np.sum(p_default_loop * v_loop * R_loop)
 
             offers = []
             
@@ -211,33 +226,61 @@ def paso2(state, params):
                 # 1. Tasa Base
                 r_offer = params.R_BAR * (1 + psi_B[j_global] * mu_B[i_global])
                 
-                # 2. Impuesto Marginal
-                tax = 0.0
+                # 2. Impuesto Marginal (SRT)
+                tax_rate = 0.0
                 delta = 0.0
                 
-                # [AUDIT FIX] Calculate Delta ALWAYS for statistics (Paper 1 Fig 3d)
-                # Even if we don't tax it, we want to know the risk generated.
-                # Use standard test loan size for consistent marginal risk measurement
-                amount_test = params.DELTA_LOAN_TEST 
-                if amount_test > available: amount_test = available # Cap at availability
+                # [AUDIT FIX] Simular Préstamo y calcular Delta EL
+                # Usamos min(amount_needed, available) como proxy del préstamo real
+                amount_test = min(amount_needed, available)
+                if amount_test < 1e-9: amount_test = 1e-9 # Prevent div/0
                 
                 L_sim = L_BB.copy()
                 L_sim[i_global, j_global] += amount_test
-                H_new, _ = calcular_riesgo_sistemico_scalar(L_sim, Equity_B)
                 
-                # [AUDIT FIX] Usar H_current_loop actualizado
-                delta = max(0, H_new - H_current_loop)
+                # -- Estado Simulado --
+                # a. DebtRank Nuevo
+                H_new, R_new = calcular_riesgo_sistemico_scalar(L_sim, Equity_B)
+                
+                # b. v Nuevo
+                total_liab_new = np.sum(L_sim, axis=1)
+                total_sys_new = np.sum(total_liab_new)
+                v_new = np.zeros(B)
+                if total_sys_new > 0:
+                    v_new = total_liab_new / total_sys_new
+                    
+                # c. p_default Nuevo (Solo cambia el deudor i_global)
+                leverage_new = total_liab_new / safe_equity
+                p_default_new = factor_pd * np.tanh(leverage_new)
+                
+                # d. EL Nuevo
+                EL_new = np.sum(p_default_new * v_new * R_new)
+                
+                # Delta Expected Loss
+                delta = max(0, EL_new - EL_loop)
                 
                 if modo == 'SRT':
-                    tax = params.ZETA * delta
+                    # [AUDIT FIX] Dimensionalidad del Impuesto
+                    # SRT (Monto) = Zeta * Delta_EL * Total_System_Volume
+                    # Tax Rate = SRT (Monto) / Loan_Amount
+                    
+                    # 1. Desnormalizar Delta EL (Adimensional -> Euros)
+                    delta_monetary = delta * total_sys_loop
+                    
+                    # 2. Calcular Monto del Impuesto
+                    tax_amount = params.ZETA * delta_monetary
+                    
+                    # 3. Convertir a Tasa
+                    tax_rate = tax_amount / amount_test
+                    
                 elif modo == 'TOBIN':
-                    tax = params.TASA_TOBIN
+                    tax_rate = params.TASA_TOBIN
                 
                 offers.append({
                     'j_global': j_global,
-                    'total_cost': r_offer + tax,
-                    'tax': tax,
-                    'delta': delta # Store potential delta
+                    'total_cost': r_offer + tax_rate,
+                    'tax': tax_rate, # This is now a rate
+                    'delta': delta 
                 })
             
             # Ordenar y ejecutar
@@ -256,7 +299,6 @@ def paso2(state, params):
                 Liq_B[j_glob] -= amount
                 tax_matrix[i_global, j_glob] = off['tax']
                 
-                # [FIX] Guardar transacción para visualización
                 if amount > 0:
                     transactions_list.append({
                         'borrower': int(i_global),
@@ -265,9 +307,6 @@ def paso2(state, params):
                         'marginal_sr': float(off['delta']),
                         'tax': float(off['tax'])
                     })
-
-                # NO es necesario recalcular H_current aquí para el modo SRT, 
-                # porque lo recalculamos al inicio del bucle `i_global`.
 
                 took_total += amount
                 if took_total >= amount_needed - 1e-9: break
@@ -286,7 +325,7 @@ def paso2(state, params):
         'firms_labor_demand': L_hired_F, 
         'wages_paid_vector': wages_paid,
         'tax_matrix': tax_matrix,
-        'transactions': transactions_list, # [FIX] Return list of transactions
+        'transactions': transactions_list, 
         'new_rates_FB': chosen_rates,
         'bank_indices': chosen_banks
     }

@@ -84,5 +84,5 @@ class Param:
     SUELO_DEMANDA_RELATIVO = 0.1    
 
     # --- Impuestos ---
-    ZETA = 0.02       # Sensibilidad SRT (Adimensional, no cambia)
+    ZETA = 1.0       # Sensibilidad SRT (Full Internalization - Paper 1)
     TASA_TOBIN = 0.002 # 0.2% (Adimensional, no cambia)
