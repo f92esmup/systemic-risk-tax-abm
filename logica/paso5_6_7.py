@@ -156,7 +156,19 @@ def paso5(state, params):
         
         Eq_F[bankrupt_F_mask] = new_equity
         Liq_F[bankrupt_F_mask] = Eq_F[bankrupt_F_mask]
-        state['firms_prices'][bankrupt_F_mask] = np.mean(state['firms_prices']) # Precio promedio
+        
+        # [AUDIT FIX] Reset Price AND Production to market average of SURVIVING firms
+        survivor_mask = ~bankrupt_F_mask
+        if np.any(survivor_mask):
+            avg_price = np.mean(state['firms_prices'][survivor_mask])
+            avg_prod = np.mean(state['firms_production'][survivor_mask])
+        else:
+            avg_price = params.PRECIO_INICIAL
+            avg_prod = params.PRODUCCION_INICIAL
+            
+        state['firms_prices'][bankrupt_F_mask] = avg_price
+        state['firms_production'][bankrupt_F_mask] = avg_prod
+        state['firms_target_production'][bankrupt_F_mask] = avg_prod # Also reset target
     
     # 2. Flujos Interbancarios (Simplificado: Pago de intereses neto)
     r_IB = params.R_BAR 

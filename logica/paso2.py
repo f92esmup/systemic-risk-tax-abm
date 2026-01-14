@@ -28,11 +28,13 @@ def calcular_riesgo_sistemico_scalar(L, equity_banks):
     W = np.minimum(1.0, L_trans * C_inv[:, np.newaxis])
     
     # 2. Valor Económico v_i
-    total_assets_per_bank = np.sum(L, axis=0) 
-    total_val = np.sum(total_assets_per_bank)
+    # [AUDIT V3 FIX] Weigh by liabilities (axis=1) instead of assets (axis=0)
+    # v_i = Total Liabilities Interbank_i / Total System Liabilities
+    total_liabilities_per_bank = np.sum(L, axis=1) 
+    total_val = np.sum(total_liabilities_per_bank)
     
     if total_val > 0:
-        v = total_assets_per_bank / total_val
+        v = total_liabilities_per_bank / total_val
     else:
         v = np.ones(B) / B
 

@@ -42,8 +42,9 @@ def paso4(state, params):
     VISITS = params.Z_CONSUMO # Número de empresas que "mira" cada consumidor
     
     # Matriz de índices aleatorios (H, VISITS) -> Qué empresas visita cada hogar
-    # randint es rápido para generar la topología de red de consumo estocástica
-    visited_indices = np.random.randint(0, F, (H, VISITS))
+    # [AUDIT FIX] Strict random sampling with replacement (households visit Z random firms)
+    rng = np.random.default_rng()
+    visited_indices = rng.integers(0, F, size=(H, VISITS))
     
     # Obtener precios de esas empresas: (H, VISITS)
     prices_seen = P_firms[visited_indices]
