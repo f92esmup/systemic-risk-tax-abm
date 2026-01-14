@@ -1,7 +1,7 @@
 import numpy as np
 from parametros import Param as p
 
-def calcular_riesgo_sistemico_scalar(L, equity_banks):
+def calcular_riesgo_sistemico_scalar(L, equity_banks, v_override=None):
     """
     Calcula el Riesgo Sistémico Total H(L) del sistema bancario usando algoritmo iterativo.
     Implementa la lógica de DebtRank (Poledna & Thurner 2016).
@@ -10,6 +10,7 @@ def calcular_riesgo_sistemico_scalar(L, equity_banks):
         L (matrix): Matriz de Pasivos Interbancarios (B, B). L[i, j] es lo que i debe a j.
                     (Fila=Deudor, Columna=Acreedor/Prestamista)
         equity_banks (vector): Capital de los bancos (B,).
+        v_override (vector, optional): Vector de importancia económica precalculado.
     
     Returns:
         H (float): Nivel de riesgo sistémico escalar (0 a 1).
@@ -35,16 +36,19 @@ def calcular_riesgo_sistemico_scalar(L, equity_banks):
     W = np.minimum(1.0, L_scaled.T)
     
     # 2. Valor Económico v_i (Eq. D2 del Paper 1)
-    # "Given the total outstanding interbank liabilities of bank i..."
-    # v_i = Total pasivos de i / Total pasivos del sistema
-    # L[i, :] son las deudas de i. Sum(L, axis=1) es el total pasivo de i.
-    total_liabilities_per_bank = np.sum(L, axis=1) 
-    total_val = np.sum(total_liabilities_per_bank)
-    
-    if total_val > 0:
-        v = total_liabilities_per_bank / total_val
+    if v_override is not None:
+        v = v_override
     else:
-        v = np.zeros(B)
+        # "Given the total outstanding interbank liabilities of bank i..."
+        # v_i = Total pasivos de i / Total pasivos del sistema
+        # L[i, :] son las deudas de i. Sum(L, axis=1) es el total pasivo de i.
+        total_liabilities_per_bank = np.sum(L, axis=1) 
+        total_val = np.sum(total_liabilities_per_bank)
+        
+        if total_val > 0:
+            v = total_liabilities_per_bank / total_val
+        else:
+            v = np.zeros(B)
 
     # 3. DebtRank Vectorial R (Iterativo)
     # R_i = Impacto económico total si banco i entra en default
@@ -154,6 +158,7 @@ def paso2(state, params):
     idxs_surplus = np.where(Liq_B > 0)[0]
     
     tax_matrix = np.zeros((B, B)) 
+    transactions_list = [] # [FIX] Lista para guardar metadatos de transacciones
 
     if len(idxs_deficit) > 0 and len(idxs_surplus) > 0:
         
@@ -196,19 +201,25 @@ def paso2(state, params):
                 
                 # 2. Impuesto Marginal
                 tax = 0.0
+                delta = 0.0
+                
+                # Always calculate delta for SRT mode to plot it, even if we don't tax it (unlikely case)
                 if modo == 'SRT':
                     amount_test = min(amount_needed, available)
                     L_sim = L_BB.copy()
                     L_sim[i_global, j_global] += amount_test
                     H_new, _ = calcular_riesgo_sistemico_scalar(L_sim, Equity_B)
-                    tax = params.ZETA * max(0, H_new - H_current)
+                    delta = max(0, H_new - H_current)
+                    tax = params.ZETA * delta
+                    
                 elif modo == 'TOBIN':
                     tax = params.TASA_TOBIN
                 
                 offers.append({
                     'j_global': j_global,
                     'total_cost': r_offer + tax,
-                    'tax': tax
+                    'tax': tax,
+                    'delta': delta # Store potential delta
                 })
             
             # Ordenar y ejecutar
@@ -227,6 +238,16 @@ def paso2(state, params):
                 Liq_B[j_glob] -= amount
                 tax_matrix[i_global, j_glob] = off['tax']
                 
+                # [FIX] Guardar transacción para visualización
+                if amount > 0:
+                    transactions_list.append({
+                        'borrower': int(i_global),
+                        'lender': int(j_glob),
+                        'amount': float(amount),
+                        'marginal_sr': float(off['delta']),
+                        'tax': float(off['tax'])
+                    })
+
                 if modo == 'SRT' and amount > 0:
                      H_current, _ = calcular_riesgo_sistemico_scalar(L_BB, Equity_B)
 
@@ -247,10 +268,11 @@ def paso2(state, params):
         'firms_labor_demand': L_hired_F, 
         'wages_paid_vector': wages_paid,
         'tax_matrix': tax_matrix,
+        'transactions': transactions_list, # [FIX] Return list of transactions
         'new_rates_FB': chosen_rates,
         'bank_indices': chosen_banks
     }
 
 def calcular_debtrank_vector(L, equity_banks, v_sys=None):
-    _, R = calcular_riesgo_sistemico_scalar(L, equity_banks)
+    _, R = calcular_riesgo_sistemico_scalar(L, equity_banks, v_override=v_sys)
     return R

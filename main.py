@@ -282,16 +282,6 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         # or separate category. Let's iterate `agents` as "Tabular Data"
         agents["globals"] = metrics_df
 
-        # SRT Scatter Data (Delta EL)
-        # Only relevant for SRT mode step-analysis, but if we want to reproduce Fig 3d:
-        # We need the Delta_EL matrix.
-        if "delta_el" in res_p2:
-            # Flatten or save matrix? Matrix is better.
-            # We add it to networks/matrices list.
-            # debug_data["delta_el"] is (B,B)
-            # Pass it as a network with a special name
-            pass
-
         # Construir matrices "completas" para graph
         # Deposits HB Matrix: Sparse
         deposits_hb_matrix = np.zeros((H, B))
@@ -316,6 +306,13 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             "net_HF": consumption_matrix_HF,
             "net_HB": deposits_hb_matrix,
         }
+        
+        # [FIX] Capture Transactions if available
+        if "transactions" in res_p2 and res_p2["transactions"]:
+            # Convert list of dicts to DataFrame
+            df_trans = pd.DataFrame(res_p2["transactions"])
+            # Add to agents dict (Logger treats 'agents' entries as tabular data to be saved as parquet)
+            agents["transactions"] = df_trans
 
         # [FIX] Record data in logger
         logger.log_step(t, agents, networks)

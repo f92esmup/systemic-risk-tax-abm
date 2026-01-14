@@ -1,4 +1,3 @@
-
 import os
 import pandas as pd
 import numpy as np
@@ -55,9 +54,6 @@ def load_simulation_data(data_dir=DATA_DIR):
 
 
         # --- 1. Global Metrics (Sim-wide) ---
-
-        
-        # --- 1. Global Metrics (Sim-wide) ---
         globals_path = os.path.join(full_run_path, "globals.parquet")
         if os.path.exists(globals_path):
             run_metrics = pd.read_parquet(globals_path)
@@ -89,35 +85,24 @@ def load_simulation_data(data_dir=DATA_DIR):
                 results[mode]["debtrank_profiles"].append(final_banks["dr"].values)
 
         # --- 3. SRT Scatter (Delta EL vs Loan Size) ---
-        # Data needed: Delta EL matrix AND Interbank Loans matrix
-        # Only available if we logged "matrix_delta_el"
+        # Data needed: Transactions list (Loan Amount vs Marginal Delta EL)
         
-        delta_path = os.path.join(full_run_path, "matrix_delta_el.parquet")
-        loans_path = os.path.join(full_run_path, "net_BB.parquet") # Sparse edge list usually
+        trans_path = os.path.join(full_run_path, "transactions.parquet")
 
-        if os.path.exists(delta_path) and os.path.exists(loans_path):
-            delta_df = pd.read_parquet(delta_path) # Edgelist: source, target, weight, t
-            loans_df = pd.read_parquet(loans_path) # Edgelist: source, target, weight, t
+        if os.path.exists(trans_path):
+            trans_df = pd.read_parquet(trans_path)
             
-            # We need to match rows by (t, source, target).
-            # Merge on keys.
-            # Delta EL usually only for specific steps, so inner join filters automatically.
-            
-            merged = pd.merge(
-                loans_df, delta_df, 
-                on=["t", "source", "target"], 
-                suffixes=("_loan", "_delta")
-            )
-            
-            if not merged.empty:
-                # Filter noise
-                mask = (merged["weight_loan"] > 1e-6) & (merged["weight_delta"] > 1e-9)
-                valid = merged[mask]
+            # Filter for SRT relevant data (where marginal_sr is recorded)
+            # Depending on mode, it might be 0, but we want to plot if it exists.
+            if "amount" in trans_df.columns and "marginal_sr" in trans_df.columns:
+                # Filter out tiny loans or zero deltas if desired, but Fig 3d plots everything usually
+                mask = (trans_df["amount"] > 0)
+                valid = trans_df[mask]
                 
                 if not valid.empty:
                     results[mode]["scatter_data"].append((
-                        valid["weight_loan"].values, 
-                        valid["weight_delta"].values
+                        valid["amount"].values, 
+                        valid["marginal_sr"].values
                     ))
 
     return results
@@ -155,6 +140,7 @@ def plot_fig_3b(results, colors):
 
 def plot_fig_3d(results, colors):
     plt.figure()
+    has_data = False
     for mode in results:
         if not results[mode]["scatter_data"]: continue
         
@@ -165,17 +151,28 @@ def plot_fig_3d(results, colors):
         
         if not all_l: continue
         
-        plt.scatter(all_l, all_d, color=colors[mode], alpha=0.3, label=mode, s=10, edgecolors='none')
+        # [FIX] Filter out zeros/negative values for log-log plot to avoid errors
+        all_l = np.array(all_l)
+        all_d = np.array(all_d)
+        mask = (all_l > 0) & (all_d > 0)
         
-    plt.xscale('log')
-    plt.yscale('log')
-    plt.xlabel('Loan Size (Log)')
-    plt.ylabel(r'$\Delta EL^{syst}$ (Log)')
-    plt.title('Fig 3d: Contribución Marginal al Riesgo')
-    plt.legend()
-    plt.grid(True, which="both", ls="-", alpha=0.2)
-    plt.tight_layout()
-    plt.savefig(f"{OUTPUT_DIR}/Fig_3d_Scatter.png")
+        if np.sum(mask) == 0: continue
+
+        plt.scatter(all_l[mask], all_d[mask], color=colors[mode], alpha=0.3, label=mode, s=10, edgecolors='none')
+        has_data = True
+        
+    if has_data:
+        plt.xscale('log')
+        plt.yscale('log')
+        plt.xlabel('Loan Size (Log)')
+        plt.ylabel(r'$\Delta EL^{syst}$ (Log)')
+        plt.title('Fig 3d: Contribución Marginal al Riesgo')
+        plt.legend()
+        plt.grid(True, which="both", ls="-", alpha=0.2)
+        plt.tight_layout()
+        plt.savefig(f"{OUTPUT_DIR}/Fig_3d_Scatter.png")
+    else:
+        print("⚠️ ADVERTENCIA: No hay datos válidos para el gráfico 3D (Posible DebtRank=0 o no SRT run)")
     plt.close()
 
 def plot_fig_4(results, colors):
