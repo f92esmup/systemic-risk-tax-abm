@@ -6,21 +6,21 @@ import numpy as np
 class SimulationLogger:
     def __init__(self):
         # Buffers para acumular datos en memoria
-        # Estructura: self.agents_buffer[agent_type] = list of dataframes
+        # Estructura: self.agents_buffer[agent_type] = lista de dataframes
         self.agents_buffer = {}
-        self.networks_buffer = {}  # self.networks_buffer[network_name] = list of dataframes (edgelist or dense wrapper)
-        self.globals_buffer = []  # list of dataframes or dicts
+        self.networks_buffer = {}  # self.networks_buffer[network_name] = lista de dataframes (edgelist o wrapper denso)
+        self.globals_buffer = []  # lista de dataframes o diccionarios
 
     def log_step(self, t, agents_data, networks_data):
         """
         Acumula los datos del paso t en los buffers.
-        agents_data: dict {name: pd.DataFrame}
-        networks_data: dict {name: np.array (matrix)}
+        agents_data: dict {nombre: pd.DataFrame}
+        networks_data: dict {nombre: np.array (matriz)}
         """
         # 1. Agentes
         for name, df in agents_data.items():
             if name == "globals":
-                # Special handling for globals (scalar metrics)
+                # Manejo especial para globales (métricas escalares)
                 df_copy = df.copy()
                 df_copy["t"] = t
                 self.globals_buffer.append(df_copy)

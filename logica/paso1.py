@@ -33,7 +33,7 @@ def paso1(state, params):
 
     F = params.F
 
-    # [FIX] Wage Update (Dynamic Wages - Paper 2 Extensión)
+    # Actualización de Salarios (Salarios Dinámicos - Extensión Artículo 2)
     # Se realiza antes de planificar producción t+1, usando resultados t-1.
     if "firms_last_profit" in state and "firms_wage" in state:
         W_prev = state["firms_wage"]
@@ -50,11 +50,11 @@ def paso1(state, params):
         gamma_w = 0.02
         xi_w = np.random.uniform(0, 1, F)
 
-        # Mascaras de ajuste
-        # Subir salario: Excess Demand (Y < D) y Beneficios > 0
+        # Máscaras de ajuste
+        # Subir salario: Exceso Demanda (Y < D) y Beneficios > 0
         raise_wage_mask = (D_prev > Y_prev) & (Profits_prev > 0)
 
-        # Bajar salario: Excess Supply (Y > D) y Beneficios < 0
+        # Bajar salario: Exceso Oferta (Y > D) y Beneficios < 0
         cut_wage_mask = (D_prev < Y_prev) & (Profits_prev < 0)
 
         # Aplicar Cambios
@@ -71,7 +71,7 @@ def paso1(state, params):
 
     # F = params.F
 
-    # 1. Calcular Precio Promedio de Mercado (Weighted Average)
+    # 1. Calcular Precio Promedio de Mercado (Promedio Ponderado)
     # Se usa para comparar si el precio de la firma es alto o bajo
     total_sales = np.minimum(Y_prev, D_prev)
     denom = np.sum(total_sales)
@@ -86,7 +86,7 @@ def paso1(state, params):
 
     # 3. Lógica Vectorial de Ajuste (Eq. 1 Gualdi et al. 2014)
     # Definir máscaras booleanas para los 4 casos posibles
-    # Fix: Incluir igualdad en excess_demand (Market Clearing es señal positiva)
+    # Incluir igualdad en exceso de demanda (Market Clearing es señal positiva)
     excess_demand = D_prev >= Y_prev
     excess_supply = ~excess_demand
     price_high = P_prev >= P_avg
@@ -97,22 +97,22 @@ def paso1(state, params):
     P_new = P_prev.copy()
 
     # Caso 1: Exceso Demanda & Precio Bajo -> Subir Precio
-    # (El paper dice: si Y < D & P < P_bar => P(t+1) = P(t)(1 + gamma_p * xi))
+    # (El artículo dice: si Y < D & P < P_bar => P(t+1) = P(t)(1 + gamma_p * xi))
     mask1 = excess_demand & price_low
     P_new[mask1] *= 1 + xi[mask1]
 
     # Caso 2: Exceso Demanda & Precio Alto -> Subir Producción
-    # (El paper dice: si Y < D & P > P_bar => Y_target(t+1) = Y(t)(1 + gamma_y * xi))
+    # (El artículo dice: si Y < D & P > P_bar => Y_target(t+1) = Y(t)(1 + gamma_y * xi))
     mask2 = excess_demand & price_high
     Y_target[mask2] *= 1 + xi[mask2]
 
     # Caso 3: Exceso Oferta & Precio Alto -> Bajar Precio
-    # (El paper dice: si Y > D & P > P_bar => P(t+1) = P(t)(1 - gamma_p * xi))
+    # (El artículo dice: si Y > D & P > P_bar => P(t+1) = P(t)(1 - gamma_p * xi))
     mask3 = excess_supply & price_high
     P_new[mask3] *= 1 - xi[mask3]
 
     # Caso 4: Exceso Oferta & Precio Bajo -> Bajar Producción
-    # (El paper dice: si Y > D & P < P_bar => Y_target(t+1) = Y(t)(1 - gamma_y * xi))
+    # (El artículo dice: si Y > D & P < P_bar => Y_target(t+1) = Y(t)(1 - gamma_y * xi))
     mask4 = excess_supply & price_low
     Y_target[mask4] *= 1 - xi[mask4]
 
@@ -121,7 +121,7 @@ def paso1(state, params):
     P_new = np.maximum(P_new, P_avg * params.SUELO_PRECIO_RELATIVO)
 
     # 5. Calcular Demanda Laboral
-    # Poledna et al. 2016: "firms define labour demand"
+    # Poledna et al. 2016: "las empresas definen la demanda laboral"
     # Asumiendo función de producción lineal Y = alpha * L => L = Y / alpha
     L_demand = np.ceil(Y_target / params.ALPHA).astype(int)
 

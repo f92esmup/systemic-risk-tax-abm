@@ -22,10 +22,10 @@ def paso5(state, params):
     Eq_F = state["firms_equity"]
     Revenue_F = state["firms_revenue"]  # Del paso 4
 
-    Liq_B = state["banks_liquidity"]  # Key matching main.py
-    Eq_B = state["banks_equity"]  # Key matching main.py
+    Liq_B = state["banks_liquidity"]  # Coincide con main.py
+    Eq_B = state["banks_equity"]  # Coincide con main.py
 
-    # SFC Correction: Households pay for re-initialization
+    # Corrección SFC: Los hogares pagan por la reinicialización
     H_deposits = state["households_deposits"]
 
     # Deudas
@@ -80,27 +80,17 @@ def paso5(state, params):
 
     # --- C. CONTABILIDAD EMPRESAS ---
     # Costos del periodo: Salarios + Intereses pagados
-    # Recuperamos salarios pagados. En main.py se llama 'wages_paid_vector' en res_p2?
-    # En main.py loop, paso2 devuelve 'wages_paid_vector'.
-    # Pero no lo guardamos en state['firms_wages_paid'] permanentemente?
-    # Deberíamos haberlo pasado en state o params?
-    # En main.py, 'wages_paid_vector' se pasa a paso3 y paso4, pero no se guardó en state['...'] explícitamente para paso5?
-    # ERROR POTENCIAL: paso5 necesita saber los salarios pagados para calcular profit exacto.
-    # Asumiremos que el profit contable aproximado es Revenue - Intereses - (Salarios estimados).
-    # O mejor: Revenue - (Liq_pre - Liq_post_wages)?
-    # Para consistencia rápida: Profit = Delta Equity.
-    # Pero necesitamos calcular Profit para saber si hay dividendos.
+    # Recuperamos salarios pagados. ¿En main.py se llama 'wages_paid_vector' en res_p2?
     # Usaremos una aproximación o asumiremos que se pasa en 'state'.
-    # Vamos a usar 'firms_labor_demand' * W_BASE como proxy de wage bill pagado (si hubo cash).
+    # Vamos a usar 'firms_labor_demand' * W_BASE como proxy de masa salarial pagada (si hubo efectivo).
     # O mejor: state['firms_production'] / alpha * W_BASE ?
 
     # Corrección: En paso2 calculamos 'wages_paid_vector'. Deberíamos haberlo inyectado en state.
-    # Como paso2 devolvió un dict y en main hicimos update de varios keys, pero no de wages_paid_vector al state global.
-    # [FIX] Usar salarios reales si están disponibles en state (inyectados en main.py)
+    # Usar salarios reales si están disponibles en state (inyectados en main.py)
     if "firms_wages_paid" in state:
         wage_bill_real = state["firms_wages_paid"]
     else:
-        # Fallback estimation
+        # Estimación de respaldo
         wage_bill_real = state["firms_labor_demand"] * state.get("firms_wage", 1.0)
 
     costs_F = wage_bill_real + np.sum(interest_covered_matrix, axis=1)
@@ -109,7 +99,7 @@ def paso5(state, params):
     # Actualizar Equity
     Eq_F += profits_F
 
-    # [FIX] Guardar beneficios para uso en paso1 (Actualización de Salarios)
+    # Guardar beneficios para uso en paso1 (Actualización de Salarios)
     state["firms_last_profit"] = profits_F.copy()
 
     # Dividendos (si Equity > 0 y Profit > 0)
@@ -133,36 +123,33 @@ def paso5(state, params):
         # Sumar pérdidas por banco
         bad_debt_loss_B = np.sum(losses_matrix, axis=0)
 
-        # Write-off de la deuda (borrarla)
+        # Cancelación de la deuda (borrarla)
         L_FB[bankrupt_F_mask, :] = 0
 
-        # REINICIO DE AGENTES (Revival Rule) - Empresas SI renacen
-        # Implementación Probabilística del Bailout (Mark 0)
-        # Con prob PROB_BAILOUT (ej 0.5), una firma sana compra la deuda (simplificado: reset)
-        # Con prob 1-p, quiebra real (reset).
-        # En este modelo simplificado, ambos llevan al reset, pero el "Bailout"
+        # REINICIO DE AGENTES (Regla de Renacimiento) - Empresas SI renacen
+        # Implementación Probabilística del Rescate (Mark 0)
+        # Con prob PROB_BAILOUT (ej 0.5), una firma sana compra la deuda (simplificado: reinicio)
+        # Con prob 1-p, quiebra real (reinicio).
+        # En este modelo simplificado, ambos llevan al reinicio, pero el "Rescate"
         # implicaría que la deuda se cubre externamente (ej. Equity negativo cubierto).
-        # El código original hacía reset directo. Vamos a mantener el reset pero explicitar
+        # El código original hacía reinicio directo. Vamos a mantener el reinicio pero explicitar
         # que es el mecanismo de resolución.
-        # Si hubiera lógica diferenciada:
-        # random_bailout = np.random.rand(np.sum(bankrupt_F_mask)) < params.PROB_BAILOUT
-        # ... logic ...
 
-        # Reset Estándar (Revival)
+        # Reinicio Estándar (Renacimiento)
         new_equity = params.PRECIO_INICIAL * params.UMBRAL_INVENTARIO * 10
 
-        # [SFC CORRECTION] Cost must come from households
+        # [SFC] El costo debe provenir de los hogares
         num_bankrupt = np.sum(bankrupt_F_mask)
         total_bailout_cost = num_bankrupt * new_equity
 
-        # Deduct from households (owners)
-        # Assuming uniform ownership or tax-like burden
+        # Deducir de los hogares (propietarios)
+        # Asumiendo propiedad uniforme o carga tipo impuesto
         H_deposits -= total_bailout_cost / len(H_deposits)
 
         Eq_F[bankrupt_F_mask] = new_equity
         Liq_F[bankrupt_F_mask] = Eq_F[bankrupt_F_mask]
 
-        # [AUDIT FIX] Reset Price AND Production to market average with variance
+        # Restablecer Precio Y Producción al promedio del mercado con varianza
         survivor_mask = ~bankrupt_F_mask
         if np.any(survivor_mask):
             avg_price = np.mean(state["firms_prices"][survivor_mask])
@@ -171,7 +158,7 @@ def paso5(state, params):
             avg_price = params.PRECIO_INICIAL
             avg_prod = params.PRODUCCION_INICIAL
 
-        # Add ±10% variation to maintain ecosystem diversity
+        # Agregar varianza de ±10% para mantener la diversidad del ecosistema
         n_reset = np.sum(bankrupt_F_mask)
         noise_p = np.random.uniform(0.9, 1.1, n_reset)
         noise_q = np.random.uniform(0.9, 1.1, n_reset)
@@ -180,14 +167,14 @@ def paso5(state, params):
         state["firms_production"][bankrupt_F_mask] = avg_prod * noise_q
         state["firms_target_production"][bankrupt_F_mask] = (
             avg_prod * noise_q
-        )  # Also reset target
+        )  # También restablecer objetivo
 
     # 2. Flujos Interbancarios (Simplificado: Pago de intereses neto)
     r_IB = params.R_BAR
     interest_IB_pay = np.sum(L_BB, axis=1) * r_IB
     interest_IB_rec = np.sum(L_BB, axis=0) * r_IB
 
-    # Net flow
+    # Flujo neto
     net_IB_cashflow = interest_IB_rec - interest_IB_pay
     Liq_B += net_IB_cashflow
 
@@ -197,7 +184,7 @@ def paso5(state, params):
 
     Eq_B += profits_B
 
-    # [FIX] Bank Dividends to prevent infinite accumulation
+    # Dividendos Bancarios para prevenir acumulación infinita
     div_mask_B = (Eq_B > 0) & (profits_B > 0)
     dividends_B = np.zeros(B)
     dividends_B[div_mask_B] = profits_B[div_mask_B] * params.DIVIDEND_RATIO
@@ -205,7 +192,7 @@ def paso5(state, params):
     Eq_B -= dividends_B
     Liq_B -= dividends_B
 
-    # Add to total dividends for households
+    # Agregar a dividendos totales para hogares
     dividends_total_val = np.sum(dividends) + np.sum(dividends_B)
 
     # 4. CASCADA DE QUIEBRAS BANCARIAS (Contagio)
@@ -213,7 +200,7 @@ def paso5(state, params):
 
     bankrupt_B_mask = Eq_B < 0
 
-    # Loop de Contagio (Iterative default)
+    # Bucle de Contagio (Default iterativo)
     # Si un banco quiebra, sus acreedores pierden el activo (L_BB[:, bankrupt])
 
     # Cola de procesamiento
@@ -235,7 +222,7 @@ def paso5(state, params):
         creditors = np.where(debt_obligations > 0)[0]
 
         for cred in creditors:
-            # Si el acreedor ya está muerto, no importa (o sí, para stats, pero no propaga)
+            # Si el acreedor ya está muerto, no importa (o sí, para estadísticas, pero no propaga)
             # Pero el requisito es "no renace", así que si ya murió, sigue muerto.
 
             loss = debt_obligations[cred]
@@ -244,7 +231,7 @@ def paso5(state, params):
             # Impactar en Equity del acreedor
             Eq_B[cred] -= loss
 
-            # Write-off
+            # Cancelación (Write-off)
             L_BB[failed_idx, cred] = 0
 
             # Verificar si el acreedor quiebra ahora por esta pérdida
@@ -255,7 +242,7 @@ def paso5(state, params):
 
         # Limpiar pasivos del fallido (ya impactados)
         L_BB[failed_idx, :] = 0
-        # [AUDIT FIX] NO limpiar activos del fallido.
+        # NO limpiar activos del fallido.
         # Si borramos L_BB[:, failed_idx], perdonamos la deuda a quienes le debían al banco quebrado.
         # Esos activos deben seguir existiendo (aunque congelados).
         # L_BB[:, failed_idx] = 0  <-- ELIMINADO
@@ -269,15 +256,15 @@ def paso5(state, params):
     return {
         "firms_equity": Eq_F,
         "firms_liquidity": Liq_F,
-        "banks_equity": Eq_B,  # Key matching main.py
-        "banks_liquidity": Liq_B,  # Key matching main.py
-        "households_deposits": H_deposits,  # [SFC] Updated deposits
+        "banks_equity": Eq_B,  # Coincide con main.py
+        "banks_liquidity": Liq_B,  # Coincide con main.py
+        "households_deposits": H_deposits,  # [SFC] Depósitos actualizados
         "net_FB": L_FB,
         "net_BB": L_BB,
         "bankruptcies_F": np.sum(bankrupt_F_mask),
         "bankruptcies_B": np.sum(bankrupt_B_mask),
         "dividends_total": dividends_total_val,
         "contagion_loss": total_losses_contagion,
-        "mask_bankrupt_F": bankrupt_F_mask,  # NEW
+        "mask_bankrupt_F": bankrupt_F_mask,  # NUEVO
     }
 

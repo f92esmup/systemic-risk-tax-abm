@@ -59,7 +59,7 @@ def paso3(
     # Matriz dispersa densa
     wages_matrix[rows, cols] = vals
 
-    # Check consistency
+    # Comprobar consistencia
     # assert np.isclose(np.sum(wages_matrix), np.sum(wages_paid_total))
 
     return (produccion_nueva, oferta_total_bienes, wages_matrix)

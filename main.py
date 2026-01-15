@@ -125,7 +125,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         "labor_matrix": np.zeros((F, H)),
     }
 
-    # [AUDIT FIX] Initialize Liability Network HETEROGENEA
+    # Inicializar red de pasivos HETEROGÉNEA
     # Préstamos iniciales proporcionales al tamaño de la empresa
     initial_loans_FB = np.zeros((F, B))
     init_banks_F = rng.integers(0, B, F)
@@ -136,29 +136,29 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     initial_loans_FB[np.arange(F), init_banks_F] = amount_vec_FB
     state["net_FB"] = initial_loans_FB
 
-    # [NEW] Initialize Interbank Network (BB) - Scale-Free (Barabási-Albert like)
-    # Paper 1 uses empirical or scale-free networks. Random is too homogeneous.
+    # Inicializar red interbancaria (BB) - Libre de escala (tipo Barabási-Albert)
+    # El Paper 1 usa redes empíricas o libres de escala. Aleatorio es demasiado homogéneo.
     initial_loans_BB = np.zeros((B, B))
 
-    # 1. Create a core of connected banks (first m banks fully connected)
-    m = 2  # Links per new node
+    # 1. Crear un núcleo de bancos conectados (los primeros m bancos totalmente conectados)
+    m = 2  # Enlaces por nuevo nodo
     if B > m:
         for i in range(m):
             for j in range(m):
                 if i != j:
-                    loan_size = equity_banks_vec[i] * 0.1  # Small initial loans
+                    loan_size = equity_banks_vec[i] * 0.1  # Préstamos iniciales pequeños
                     initial_loans_BB[i, j] = loan_size
 
-        # 2. Add remaining banks with preferential attachment (incoming links ~ degree)
-        # We use in-degree (who has many lenders) as proxy for "prominence" or simply random + degree
-        # For simplicity in directed graph: attach to nodes with high total degree (in + out)
+        # 2. Agregar bancos restantes con conexión preferencial (enlaces entrantes ~ grado)
+        # Usamos el grado de entrada (quién tiene muchos prestamistas) como proxy de "prominencia" o simplemente aleatorio + grado
+        # Por simplicidad en grafo dirigido: conectar a nodos con alto grado total (entrada + salida)
 
         for i in range(m, B):
-            # Calculate probabilities based on current degree (sum of binary connections)
+            # Calcular probabilidades basadas en el grado actual (suma de conexiones binarias)
             adjacency = (initial_loans_BB > 0).astype(int)
             degrees = np.sum(adjacency, axis=0) + np.sum(
                 adjacency, axis=1
-            )  # Total degree
+            )  # Grado total
             total_degree = np.sum(degrees)
 
             if total_degree == 0:
@@ -166,13 +166,13 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             else:
                 probs = degrees / total_degree
 
-            # Select m targets to lend TO (i becomes creditor? or debtor?)
-            # Usually new entrants borrow from hubs. Let's say i borrows from existing hubs.
-            # So i is Debtor (Row), Hubs are Creditors (Col).
+            # Seleccionar m objetivos para PRESTAR (¿i se convierte en acreedor? ¿o deudor?)
+            # Usualmente los nuevos entrantes piden prestado a los hubs. Digamos que i pide prestado a hubs existentes.
+            # Así que i es Deudor (Fila), Hubs son Acreedores (Columna).
 
-            # Sample m unique targets from existing nodes 0..B-1 (but probs only non-zero for 0..i-1 typically?)
-            # Barabasi usually grows. Here we just pick from all, weighted by current degree.
-            # Mask self
+            # Muestrear m objetivos únicos de nodos existentes 0..B-1 (¿pero probs solo no-cero para 0..i-1 típicamente?)
+            # Barabasi usualmente crece. Aquí solo elegimos de todos, ponderado por grado actual.
+            # Enmascarar a sí mismo
             probs[i] = 0
             norm = np.sum(probs)
             if norm > 0:
@@ -185,23 +185,23 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             targets = rng.choice(np.arange(B), size=m, replace=False, p=probs)
 
             for t in targets:
-                # i borrows from t
+                # i pide prestado a t
                 loan_size = equity_banks_vec[i] * 0.2
                 initial_loans_BB[i, t] = loan_size
 
     state["net_BB"] = initial_loans_BB
 
-    # Adjust liquidity (Loan proceeds/disbursements)
-    # Firms gain liquidity from FB loans
+    # Ajustar liquidez (ingresos/desembolsos de préstamos)
+    # Las empresas ganan liquidez de los préstamos FB
     state["firms_liquidity"] += np.sum(initial_loans_FB, axis=1)
 
-    # Banks:
-    # - Lose liquidity from FB loans (Lending to firms)
-    # - Gain liquidity from BB borrowing (Borrower side)
-    # - Lose liquidity from BB lending (Lender side)
-    state["banks_liquidity"] -= np.sum(initial_loans_FB, axis=0)  # Lending to firms
-    state["banks_liquidity"] += np.sum(initial_loans_BB, axis=1)  # Borrowing from banks
-    state["banks_liquidity"] -= np.sum(initial_loans_BB, axis=0)  # Lending to banks
+    # Bancos:
+    # - Pierden liquidez por préstamos FB (Prestar a empresas)
+    # - Ganan liquidez por préstamos BB (Lado prestatario)
+    # - Pierden liquidez por préstamos BB (Lado prestamista)
+    state["banks_liquidity"] -= np.sum(initial_loans_FB, axis=0)  # Prestar a empresas
+    state["banks_liquidity"] += np.sum(initial_loans_BB, axis=1)  # Lado prestatario
+    state["banks_liquidity"] -= np.sum(initial_loans_BB, axis=0)  # Lado prestamista
 
     # Historia (Aggregates for Plots)
     historia = {
@@ -235,10 +235,10 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         state["net_BB"] = res_p2["net_BB"]
         state["firms_liquidity"] = res_p2["firms_liquidity"]
         state["banks_liquidity"] = res_p2["banks_liquidity"]
-        state["firms_labor_demand"] = res_p2["firms_labor_demand"]  # Real hired
+        state["firms_labor_demand"] = res_p2["firms_labor_demand"]  # Contratados reales
         state["firms_wages_paid"] = res_p2[
             "wages_paid_vector"
-        ]  # [FIX] Guardar salarios reales para Paso 5
+        ]  # Guardar salarios reales para Paso 5
 
         # Actualizar tasas FB donde hubo préstamos nuevos
         # res_p2['new_rates_FB'] vector (F,)
@@ -254,7 +254,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             }
 
         # Calcular DebtRank (Reporting)
-        # [AUDIT FIX] v debe basarse en Pasivos (Liabilities), que son la suma por filas (axis=1)
+        # v debe basarse en Pasivos (Liabilities), que son la suma por filas (axis=1)
         total_liabilities = np.sum(state["net_BB"], axis=1)
         V_total = np.sum(total_liabilities)
         if V_total > 1e-6:
@@ -269,13 +269,13 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
 
         # Paso 3: Producción Física (Ya se pagaron salarios en P2)
         (produccion_real, oferta_bienes, wages_matrix_FH) = paso3(
-            state["firms_labor_demand"],  # Hired
-            res_p2["wages_paid_vector"],  # Wage Bill
+            state["firms_labor_demand"],  # Contratados
+            res_p2["wages_paid_vector"],  # Masa salarial
             state["firms_inventory"],
         )
         state["firms_production"] = produccion_real
         state["firms_inventory"] = (
-            oferta_bienes  # [FIX CRITICAL] Add production to inventory
+            oferta_bienes  # Agregar producción al inventario
         )
         state["labor_matrix"] = wages_matrix_FH
 
@@ -307,7 +307,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         state["banks_equity"] = res_p5["banks_equity"]
         state["net_BB"] = res_p5["net_BB"]
 
-        # [SFC CORRECTION] Update households deposits (less bailout costs)
+        # Actualizar depósitos de hogares (menos costos de rescate)
         state["households_deposits"] = res_p5["households_deposits"]
 
         dividendos_total = res_p5["dividends_total"]
@@ -315,14 +315,14 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         state["households_dividends"] = np.full(H, dividendos_pc)
         state["households_deposits"] += state[
             "households_dividends"
-        ]  # Pagar dividendos a hogares (Income)
+        ]  # Pagar dividendos a hogares (Ingreso)
 
         state["mask_renacidas"] = res_p5["mask_bankrupt_F"]
 
         # Reset de Tasas FB para empresas que murieron (y renacieron)
         state["rates_FB"][state["mask_renacidas"], :] = 0.0
 
-        # Stop condition: All banks insolvent
+        # Condición de parada: Todos los bancos insolventes
         if np.sum(state["banks_equity"] > 0) == 0:
             print(
                 f"Colapso total del sistema bancario en t={t}. Deteniendo simulación."
@@ -349,7 +349,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             }
 
         # --- PARQUET LOGGING ---
-        # Data Preparation
+        # Preparación de Datos
         agents = {
             "firms": pd.DataFrame(
                 {
@@ -364,7 +364,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
                     "id": range(B),
                     "liq": state["banks_liquidity"],
                     "eq": state["banks_equity"],
-                    "dr": dr_vector,  # [NEW] Saved specifically for plotting Fig 3b
+                    "dr": dr_vector,  # Guardado específicamente para graficar Fig 3b
                 }
             ),
             "households": pd.DataFrame(
@@ -376,8 +376,8 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             ),
         }
 
-        # Global Metrics (Scalars)
-        # Saved as a single-row DataFrame for consistency
+        # Métricas Globales (Escalares)
+        # Guardado como un DataFrame de una sola fila para consistencia
         metrics_df = pd.DataFrame(
             [
                 {
@@ -391,24 +391,24 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             ]
         )
 
-        # Add metrics to agents dict for saving (hacky but keeps signature clean)
-        # or separate category. Let's iterate `agents` as "Tabular Data"
+        # Agregar métricas al diccionario de agentes para guardar (truco sucio pero mantiene la firma limpia)
+        # o categoría separada. Iteremos agentes como "Datos Tabulares"
         agents["globals"] = metrics_df
 
         # Construir matrices "completas" para graph
-        # Deposits HB Matrix: Sparse
+        # Matriz de Depósitos HB: Dispersa
         deposits_hb_matrix = np.zeros((H, B))
         deposits_hb_matrix[np.arange(H), state["households_bank"]] = state[
             "households_deposits"
         ]
 
-        # Consumption Matrix HF reconstruction
-        # res_p4['consumption_flows'] is tuple (chosen_firms, actual_spending_H)
+        # Reconstrucción de Matriz de Consumo HF
+        # res_p4['consumption_flows'] es tupla (empresas_elegidas, gasto_real_H)
         (chosen_firms, actual_spending_H) = res_p4["consumption_flows"]
         consumption_matrix_HF = np.zeros(
             (H, F)
-        )  # Warning: Dense matrix might be heavy? H=1300 F=100 -> 130k elements. OK.
-        # Vectorized fill
+        )  # Advertencia: ¿La matriz densa podría ser pesada? H=1300 F=100 -> 130k elementos. OK.
+        # Relleno vectorizado
         # consumption_matrix_HF[h, chosen_firm[h]] = spending[h]
         consumption_matrix_HF[np.arange(H), chosen_firms] = actual_spending_H
 
@@ -420,14 +420,14 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             "net_HB": deposits_hb_matrix,
         }
 
-        # [FIX] Capture Transactions if available
+        # Capturar transacciones si están disponibles
         if "transactions" in res_p2 and res_p2["transactions"]:
-            # Convert list of dicts to DataFrame
+            # Convertir lista de diccionarios a DataFrame
             df_trans = pd.DataFrame(res_p2["transactions"])
-            # Add to agents dict (Logger treats 'agents' entries as tabular data to be saved as parquet)
+            # Agregar al diccionario de agentes (Logger trata las entradas 'agents' como datos tabulares para guardar como parquet)
             agents["transactions"] = df_trans
 
-        # [FIX] Record data in logger
+        # Registrar datos en el logger
         logger.log_step(t, agents, networks)
 
     logger.flush(run_id)

@@ -26,12 +26,12 @@ class Param:
     # Precio con margen = 24,000 € (Margen MASIVO para robustez extrema)
     PRECIO_INICIAL = 24000.0
 
-    R_BAR = 0.02  # Tasa de interés (2.0% mensual) - Paper 1 Table I
-    DIVIDEND_RATIO = 0.2  # 20% de beneficios a dividendos - Paper 1 Table I
-    PROPENSION_CONSUMO = 0.8  # Gastan el 80% de su sueldo - Paper 1 Table I (c)
+    R_BAR = 0.02  # Tasa de interés (2.0% mensual) - Artículo 1 Tabla I
+    DIVIDEND_RATIO = 0.2  # 20% de beneficios a dividendos - Artículo 1 Tabla I
+    PROPENSION_CONSUMO = 0.8  # Gastan el 80% de su sueldo - Artículo 1 Tabla I (c)
 
     # --- Parámetros de Crédito y Deuda ---
-    TAU = 0.05  # Amortización de deuda (5% mensual) - Paper 1 Table I
+    TAU = 0.05  # Amortización de deuda (5% mensual) - Artículo 1 Tabla I
     PHI = 0.8  # Restricción de crédito
     R_MAX = 0.25  # Tasa usura (>25%)
 
@@ -85,7 +85,7 @@ class Param:
     SUELO_DEMANDA_RELATIVO = 0.1
 
     # --- Impuestos ---
-    ZETA = 1.0  # Sensibilidad SRT (Full Internalization - Paper 1)
+    ZETA = 1.0  # Sensibilidad SRT (Internalización Completa - Artículo 1)
     TASA_TOBIN = 0.002  # 0.2% (Adimensional, no cambia)
 
     # --- Configuración ---

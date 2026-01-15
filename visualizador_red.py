@@ -148,7 +148,7 @@ def generar_gif_macro(data, output_file, duration):
         theta = 2 * np.pi * i / p.F
         pos[node] = np.array([np.cos(theta), np.sin(theta)]) * 1.0
 
-    G_layout = nx.Graph()  # Dummy graph for drawing
+    # Grafo auxiliar para dibujo
 
     steps = sorted(df_banks["t"].unique())
     frames = []
@@ -219,7 +219,7 @@ def generar_gif_macro(data, output_file, duration):
                 ax=ax,
             )
 
-        # F-B (Source=Firma 0..99 -> Layout ID = Source + p.B)
+        # F-B (Origen=Firma 0..99 -> ID de Layout = Origen + p.B)
         valid_fb = edges_fb_t[edges_fb_t["weight"] > 10.0]
         ef = [(r + p.B, c) for r, c in zip(valid_fb["source"], valid_fb["target"])]
         if ef:

@@ -24,17 +24,11 @@ def paso4(state, params):
     # Datos de entrada
     P_firms = state["firms_prices"]  # (F,)
     S_firms = state["firms_inventory"]  # (F,) Oferta disponible (Inv + Prod)
-    # Check key consistency: main.py uses 'households_deposits', logic uses 'households_liquidity' ??
-    # main.py initialization: 'households_deposits'
-    # paso4 prompt code: 'households_liquidity'
-    # I should use the key from main.py or update main.py.
-    # Let's check main.py state keys again.
-    # main.py has 'households_deposits'.
-    # I will stick to 'households_deposits' to match main.py.
+    # Verificar consistencia de claves: main.py usa 'households_deposits'
     M_households = state["households_deposits"]  # (H,)
 
     # 1. Presupuesto de Consumo (Propensión marginal al consumo)
-    # Gualdi et al: Budget = c * Savings
+    # Gualdi et al: Presupuesto = c * Ahorros
     budget_H = M_households * params.PROPENSION_CONSUMO
 
     # --- B. MATCHING VECTORIAL (BÚSQUEDA DE PRECIOS) ---
@@ -42,7 +36,7 @@ def paso4(state, params):
     VISITS = params.Z_CONSUMO  # Número de empresas que "mira" cada consumidor
 
     # Matriz de índices aleatorios (H, VISITS) -> Qué empresas visita cada hogar
-    # [AUDIT FIX] Strict random sampling with replacement (households visit Z random firms)
+    # Muestreo aleatorio estricto con reemplazo (hogares visitan Z empresas aleatorias)
     rng = np.random.default_rng()
     visited_indices = rng.integers(0, F, size=(H, VISITS))
 
@@ -53,7 +47,7 @@ def paso4(state, params):
     best_local_idx = np.argmin(prices_seen, axis=1)
 
     # Obtener el índice global de la empresa elegida (H,)
-    # Select from visited_indices using row_range and best_local_idx
+    # Seleccionar de visited_indices usando row_range y best_local_idx
     chosen_firms = visited_indices[np.arange(H), best_local_idx]
 
     # --- C. AGREGACIÓN DE DEMANDA (INTENCIÓN DE COMPRA) ---

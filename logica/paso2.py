@@ -19,9 +19,9 @@ def calcular_riesgo_sistemico_scalar(L, equity_banks, v_override=None):
     B = len(equity_banks)
     T_steps_debtrank = 100  # Máximo pasos de propagación
 
-    # 1. Matriz de Impacto W_ij (Eq. D1 del Paper 1)
+    # 1. Matriz de Impacto W_ij (Eq. D1 del Artículo 1)
     # W[j, i] debe ser el impacto sobre j (Acreedor) causado por el default de i (Deudor).
-    # Fórmula Paper: W_ji = min(1, A_ji / E_j) donde A_ji es lo que i debe a j.
+    # Fórmula Artículo: W_ji = min(1, A_ji / E_j) donde A_ji es lo que i debe a j.
     # En nuestra matriz L: L[i, j] es lo que i debe a j.
     # Por tanto: W[j, i] = min(1, L[i, j] / E_j)
 
@@ -35,11 +35,11 @@ def calcular_riesgo_sistemico_scalar(L, equity_banks, v_override=None):
     # W[j, i] = L_scaled[i, j] = L[i, j] / E_j
     W = np.minimum(1.0, L_scaled.T)
 
-    # 2. Valor Económico v_i (Eq. D2 del Paper 1)
+    # 2. Valor Económico v_i (Eq. D2 del Artículo 1)
     if v_override is not None:
         v = v_override
     else:
-        # "Given the total outstanding interbank liabilities of bank i..."
+        # "Dado el total de pasivos interbancarios pendientes del banco i..."
         # v_i = Total pasivos de i / Total pasivos del sistema
         # L[i, :] son las deudas de i. Sum(L, axis=1) es el total pasivo de i.
         total_liabilities_per_bank = np.sum(L, axis=1)
@@ -72,10 +72,10 @@ def calcular_riesgo_sistemico_scalar(L, equity_banks, v_override=None):
             h = np.minimum(1.0, h + impact)
 
         # R_i = Suma ponderada del distress final en el sistema
-        # Paper 1 Eq D5 (aprox): R_i = Sum(h_j * v_j) - (contribución propia inicial excluida a veces, aquí completa)
+        # Artículo 1 Ec D5 (aprox): R_i = Sum(h_j * v_j) - (contribución propia inicial excluida a veces, aquí completa)
         R[i] = np.sum(h * v)
 
-    # 4. Riesgo Escalar H (Eq. 5 del Paper 1)
+    # 4. Riesgo Escalar H (Eq. 5 del Artículo 1)
     # H es el DebtRank promedio ponderado por importancia económica
     H = np.sum(R * v)
 
@@ -172,7 +172,7 @@ def paso2(state, params):
     transactions_list = []
 
     if len(idxs_deficit) > 0 and len(idxs_surplus) > 0:
-        # Factor para probabilidad de default (Eq. 5 Paper 1)
+        # Factor para probabilidad de default (Ec. 5 Artículo 1)
         factor_pd = getattr(params, "FACTOR_PROB_DEFAULT", 0.01)
         safe_equity = np.maximum(Equity_B, 1e-9)
 
@@ -203,7 +203,7 @@ def paso2(state, params):
             )
             sampled_j_globals = idxs_surplus[sampled_j_locals]
 
-            # [AUDIT FIX] Calcular Expected Systemic Loss (EL) BASE para el bucle actual
+            # Calcular Pérdida Sistémica Esperada (EL) BASE para el bucle actual
             # 1. Estado Actual de la Red (Recalculado por si hubo cambios)
             _, R_loop = calcular_riesgo_sistemico_scalar(L_BB, Equity_B)
 
@@ -212,7 +212,7 @@ def paso2(state, params):
             total_sys_loop = np.sum(total_liab_loop)
 
             # 3. Vector p_default (Probabilidad de Default)
-            # Proxy: tanh(Leverage)
+            # Proxy: tanh(Apalancamiento)
             leverage_loop = total_liab_loop / safe_equity
             p_default_loop = factor_pd * np.tanh(leverage_loop)
 
@@ -232,11 +232,11 @@ def paso2(state, params):
                 # 2. Impuesto Marginal (SRT)
                 tax_rate = 0.0
 
-                # [AUDIT FIX] Simular Préstamo y calcular Delta EL
+                # Simular Préstamo y calcular Delta EL
                 # Usamos min(amount_needed, available) como proxy del préstamo real
                 amount_test = min(amount_needed, available)
                 if amount_test < 1e-9:
-                    amount_test = 1e-9  # Prevent div/0
+                    amount_test = 1e-9  # Prevenir div/0
 
                 L_sim = L_BB.copy()
                 L_sim[i_global, j_global] += amount_test
@@ -257,7 +257,7 @@ def paso2(state, params):
                 # d. EL Nuevo
                 EL_new = np.sum(p_default_new * R_new)
 
-                # [AUDIT FIX] Delta EL Monetario (Ec. 3 Paper 1)
+                # Delta EL Monetario (Ec. 3 Artículo 1)
                 # EL_monetary = EL_adimensional * V_total
                 EL_monetary_loop = EL_loop * total_sys_loop
                 EL_monetary_new = EL_new * total_sys_new
@@ -265,11 +265,11 @@ def paso2(state, params):
                 delta_monetary = max(0, EL_monetary_new - EL_monetary_loop)
 
                 if modo == "SRT":
-                    # [AUDIT FIX] Dimensionalidad del Impuesto
-                    # Tax Rate = SRT (Monto) / Loan_Amount
+                    # Dimensionalidad del Impuesto
+                    # Tasa Impuesto = SRT (Monto) / Monto_Prestamo
 
                     # 2. Calcular Monto del Impuesto
-                    # ZETA es 1.0 (Full Internalization) -> Tax = Delta EL Monetario
+                    # ZETA es 1.0 (Internalización Completa) -> Tax = Delta EL Monetario
                     tax_amount = params.ZETA * delta_monetary
 
                     # 3. Convertir a Tasa
@@ -282,8 +282,8 @@ def paso2(state, params):
                     {
                         "j_global": j_global,
                         "total_cost": r_offer + tax_rate,
-                        "tax": tax_rate,  # This is now a rate
-                        "delta": delta_monetary,  # Store monetary delta for stats
+                        "tax": tax_rate,  # Esto ahora es una tasa
+                        "delta": delta_monetary,  # Guardar delta monetario para estadísticas
                     }
                 )
 
