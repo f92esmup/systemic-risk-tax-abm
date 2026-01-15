@@ -1,11 +1,11 @@
 import numpy as np
-from parametros import Param as p
 
 
 def paso3(
     labor_hired,  # Vector (F,) Trabajadores realmente contratados (input de paso 2)
     wages_paid_total,  # Vector (F,) Masa salarial total pagada (input de paso 2)
     inventario_previo,  # Vector (F,)
+    params,  # Objeto Param con constantes
 ):
     """
     Paso 3: Producción Física (Adaptado a Vectorización)
@@ -16,7 +16,7 @@ def paso3(
 
     # 1. Producción Física
     # Función de producción lineal: Y = alpha * N
-    produccion_nueva = labor_hired * p.ALPHA
+    produccion_nueva = labor_hired * params.ALPHA
 
     # 2. Oferta Total
     oferta_total_bienes = inventario_previo + produccion_nueva
@@ -25,10 +25,10 @@ def paso3(
     # Distribuir la masa salarial pagada (wages_paid_total) a los hogares.
     # Usamos la lógica determinista "banded" para visualización consistente.
 
-    wages_matrix = np.zeros((p.F, p.H))
+    wages_matrix = np.zeros((params.F, params.H))
 
     # Numero de empleados "graficos" por empresa
-    k_employees = max(1, p.H // p.F)
+    k_employees = max(1, params.H // params.F)
 
     # Vectorización del loop de asignación de salarios
     # Crear índices para broadcasting
@@ -36,10 +36,10 @@ def paso3(
     # indices[f, k] = (f * K + k) % H
 
     # Expandimos índices: (F, K)
-    f_indices = np.arange(p.F)[:, np.newaxis]
+    f_indices = np.arange(params.F)[:, np.newaxis]
     k_offsets = np.arange(k_employees)[np.newaxis, :]
 
-    h_indices = (f_indices * k_employees + k_offsets) % p.H
+    h_indices = (f_indices * k_employees + k_offsets) % params.H
 
     # Valores a asignar: WageBill[f] / K
     # wage_values = (wages_paid_total / k_employees)[:, np.newaxis]
@@ -52,7 +52,7 @@ def paso3(
     # pero vectorizado es mejor.
 
     # Flatten arrays
-    rows = np.repeat(np.arange(p.F), k_employees)
+    rows = np.repeat(np.arange(params.F), k_employees)
     cols = h_indices.flatten()
     vals = np.repeat(wages_paid_total / k_employees, k_employees)
 

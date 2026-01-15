@@ -274,6 +274,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             state["firms_labor_demand"],  # Contratados
             res_p2["wages_paid_vector"],  # Masa salarial
             state["firms_inventory"],
+            p,
         )
         state["firms_production"] = produccion_real
         state["firms_inventory"] = oferta_bienes  # Agregar producción al inventario
