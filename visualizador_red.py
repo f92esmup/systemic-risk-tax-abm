@@ -149,6 +149,7 @@ def generar_gif_macro(data, output_file, duration):
         pos[node] = np.array([np.cos(theta), np.sin(theta)]) * 1.0
 
     # Grafo auxiliar para dibujo
+    G_layout = nx.Graph()
 
     steps = sorted(df_banks["t"].unique())
     frames = []
