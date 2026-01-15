@@ -1,7 +1,6 @@
 import os
 import pandas as pd
 import numpy as np
-import shutil
 
 
 class SimulationLogger:
@@ -100,7 +99,7 @@ class SimulationLogger:
 
         # Limpiar buffers tras flush
         self.clear()
-        print(f"   [Logger] Done.")
+        print("   [Logger] Done.")
 
     def clear(self):
         self.agents_buffer = {}
