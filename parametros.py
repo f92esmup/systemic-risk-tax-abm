@@ -9,7 +9,7 @@ class Param:
     B = 20  # Bancos
     F = 100  # Empresas
     H = 1300  # Hogares
-    T = 200  # Tiempo
+    T = 250  # Tiempo
 
     # --- FACTOR DE ESCALA (Solo para referencia mental) ---
     # K = 2000. Si antes W=1.0, ahora W=2000.0
