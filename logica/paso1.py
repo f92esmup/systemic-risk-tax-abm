@@ -130,4 +130,3 @@ def paso1(state, params):
         "firms_prices": P_new,
         "firms_labor_demand": L_demand,
     }
-

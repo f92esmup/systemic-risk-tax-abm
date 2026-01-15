@@ -342,4 +342,3 @@ def paso2(state, params):
 def calcular_debtrank_vector(L, equity_banks, v_sys=None):
     _, R = calcular_riesgo_sistemico_scalar(L, equity_banks, v_override=v_sys)
     return R
-

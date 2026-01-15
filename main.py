@@ -146,7 +146,9 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         for i in range(m):
             for j in range(m):
                 if i != j:
-                    loan_size = equity_banks_vec[i] * 0.1  # Préstamos iniciales pequeños
+                    loan_size = (
+                        equity_banks_vec[i] * 0.1
+                    )  # Préstamos iniciales pequeños
                     initial_loans_BB[i, j] = loan_size
 
         # 2. Agregar bancos restantes con conexión preferencial (enlaces entrantes ~ grado)
@@ -274,9 +276,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             state["firms_inventory"],
         )
         state["firms_production"] = produccion_real
-        state["firms_inventory"] = (
-            oferta_bienes  # Agregar producción al inventario
-        )
+        state["firms_inventory"] = oferta_bienes  # Agregar producción al inventario
         state["labor_matrix"] = wages_matrix_FH
 
         # --- CORRECCIÓN STOCK-FLOW: PAGO DE SALARIOS A HOGARES ---

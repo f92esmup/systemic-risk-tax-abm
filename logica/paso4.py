@@ -110,4 +110,3 @@ def paso4(state, params):
             actual_spending_H,
         ),  # Tupla comprimida para logging si es necesario
     }
-

@@ -267,4 +267,3 @@ def paso5(state, params):
         "contagion_loss": total_losses_contagion,
         "mask_bankrupt_F": bankrupt_F_mask,  # NUEVO
     }
-

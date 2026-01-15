@@ -63,4 +63,3 @@ def paso3(
     # assert np.isclose(np.sum(wages_matrix), np.sum(wages_paid_total))
 
     return (produccion_nueva, oferta_total_bienes, wages_matrix)
-
