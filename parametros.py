@@ -88,3 +88,5 @@ class Param:
     ZETA = 1.0  # Sensibilidad SRT (Full Internalization - Paper 1)
     TASA_TOBIN = 0.002  # 0.2% (Adimensional, no cambia)
 
+    # --- Configuración ---
+    MODO_IMPUESTO = "NINGUNO"

@@ -1,7 +1,8 @@
 import numpy as np
-import time
 import os
 import matplotlib.pyplot as plt
+import pandas as pd
+from logger import SimulationLogger
 from parametros import Param as p
 
 # Importación de Módulos Lógicos
@@ -28,7 +29,7 @@ plt.rcParams.update(PARAMS)
 OUTPUT_DIR = "output_plots"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-SIMULATIONS_PER_MODE = 1000  # Cantidad de simulaciones para suavizado estadísticoSIMULATIONS_PER_MODE = 5  # Cantidad de simulaciones para suavizado estadístico
+SIMULATIONS_PER_MODE = 5  # Cantidad de simulaciones para suavizado estadístico
 
 # =============================================================================
 # MOTOR DE SIMULACIÓN
@@ -36,10 +37,6 @@ SIMULATIONS_PER_MODE = 1000  # Cantidad de simulaciones para suavizado estadíst
 # =============================================================================
 # MOTOR DE SIMULACIÓN Y LOGGING
 # =============================================================================
-import pandas as pd
-import shutil
-
-from logger import SimulationLogger
 
 # Eliminar antigua función guardar_datos_parquet ya que usamos SimulationLogger
 
@@ -54,7 +51,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     # Limpiar/Crear directorio run si es t=0 (hecho por caller o aqui)
     # create_run_dir(run_id)
 
-    start_time = time.time()
+    # start_time = time.time()
     logger = SimulationLogger()
 
     # GENERADORES DE HETEROGENEIDAD
@@ -228,7 +225,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
 
         # Paso 2: Crédito y Salarios (Matrix FB & BB)
         # Inyectar MODO_IMPUESTO en params dinámicamente
-        p.MODO_IMPUESTO = modo_impuesto
+        p.MODO_IMPUESTO = modo_impuesto  # type: ignore
 
         # Llamada vectorizada
         res_p2 = paso2(state, p)
