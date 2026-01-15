@@ -1,6 +1,3 @@
-# parametros.py
-
-
 class Param:
     """
     Parámetros del Modelo CRISIS / SRT - ESCALA REAL (EUROS)
@@ -18,20 +15,26 @@ class Param:
     # K = 2000. Si antes W=1.0, ahora W=2000.0
 
     # --- Parámetros Económicos ---
-    ALPHA = 0.1  # Productividad (Físico: 1 trabajador produce 0.25 coches/mes)
+    ALPHA = 0.1  # Productividad (Físico: 1 trabajador produce 0.1 coches/mes)
     W_BASE = 2200.0  # Salario Base Mensual en €
 
     # Precio Inicial: Margen sobre costes.
     # Coste laboral unitario = W / ALPHA = 2200 / 0.1 = 22,000 €
-    # Precio con margen = 24,000 € (Margen MASIVO para robustez extrema)
-    PRECIO_INICIAL = 24000.0
+    # Precio con margen = 35,000 € (Margen MASIVO para robustez extrema)
+    # Aumentamos precio significativamente para asegurar márgenes altos a las empresas
+    # Coste ~22k. Precio 35k -> Margen ~37%.
+    # Esto reduce drásticamente la probabilidad de default inicial.
+    PRECIO_INICIAL = 35000.0
 
-    R_BAR = 0.02  # Tasa de interés (2.0% mensual) - Artículo 1 Tabla I
-    DIVIDEND_RATIO = 0.2  # 20% de beneficios a dividendos - Artículo 1 Tabla I
-    PROPENSION_CONSUMO = 0.8  # Gastan el 80% de su sueldo - Artículo 1 Tabla I (c)
+    # --- Ajuste de Estabilidad con DIVIDENDOS ALTOS ---
+    R_BAR = (
+        0.015  # 1.5% mensual. Equilibrio entre ingresos bancarios y carga a empresas.
+    )
+    DIVIDEND_RATIO = 0.20  # <--- REQUERIMIENTO: 20% (Volvemos al valor del Paper)
+    PROPENSION_CONSUMO = 0.9  # Alto consumo para mantener flujo de caja en empresas
 
     # --- Parámetros de Crédito y Deuda ---
-    TAU = 0.05  # Amortización de deuda (5% mensual) - Artículo 1 Tabla I
+    TAU = 0.01  # Amortización de deuda (1% mensual) - Ajuste: Lenta para reducir salida de caja
     PHI = 0.8  # Restricción de crédito
     R_MAX = 0.25  # Tasa usura (>25%)
 
@@ -40,25 +43,30 @@ class Param:
     # L_demand ~ 13 trabajadores -> Producción ~ 1.3 unidades
     PRODUCCION_INICIAL = 1.3
 
-    # Stocks Financieros (Escalados x2000 respecto a versión anterior)
+    # Stocks Financieros (ESCENARIO "RICH SYSTEM")
+    # Para sobrevivir al drenaje de dividendos (20%), necesitamos stocks masivos.
 
     # Equity Firmas: Colchón para no quebrar día 1.
-    EQUITY_INICIAL_FIRMAS = 40000.0
+    EQUITY_INICIAL_FIRMAS = 500000.0  # Antes 200k
 
     # Liquidez Firmas: Nómina de 1 mes aprox (13 emp * 2200€ = 28.600€)
     # Les damos menos para obligarlas a pedir crédito.
-    LIQUIDEZ_INICIAL_FIRMAS = 15000.0
+    LIQUIDEZ_INICIAL_FIRMAS = 200000.0  # Antes 100k
 
     # Equity Bancos: Capital Base. Lo hacemos bajo para fragilidad.
-    # Antes 20.0 -> Ahora 40.000 €
-    EQUITY_INICIAL_BANCOS = 40000.0
+    # Equity Bancario x10 respecto a pruebas anteriores para soportar payout de 20%
+    EQUITY_INICIAL_BANCOS = 2000000.0  # 2 Millones
 
     # Liquidez Bancos: Dinero prestable. Escaso para forzar interbancario.
     # Aumentado a 50k para sostener ciclos largos (t>200).
-    LIQUIDEZ_INICIAL_BANCOS = 50000.0
+    LIQUIDEZ_INICIAL_BANCOS = 1000000.0  # 1 Millon
 
     # Depósitos Hogares: Ahorro inicial
-    DEPOSITOS_INICIALES_HOGARES = 100000.0
+    DEPOSITOS_INICIALES_HOGARES = 500000.0
+
+    # --- Parámetros de Heterogeneidad ---
+    SIGMA_SIZE = 0.8  # Dispersión Log-Normal para tamaños (Equity, Producción)
+    SPREAD_PRICE = 0.05  # Dispersión Uniforme para precios iniciales (±5%)
 
     # --- Parámetros de Red y Búsqueda ---
     N_BANCOS_CONTACTADOS = 5

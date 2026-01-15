@@ -73,19 +73,15 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     # 1. INICIALIZACIÓN HETEROGÉNEA
     F, B, H = p.F, p.B, p.H
 
-    # Parámetros de dispersión (sigma para lognormal, pct para uniforme)
-    SIGMA_SIZE = 0.5  # Dispersión de tamaño (Equity, Producción)
-    SPREAD_PRICE = 0.05  # 5% de variación en precios iniciales
-
     # Generar vectores base
     # Empresas: Tamaños diversos
-    prod_ini_vec = lognorm_vec(p.PRODUCCION_INICIAL, SIGMA_SIZE, F)
+    prod_ini_vec = lognorm_vec(p.PRODUCCION_INICIAL, p.SIGMA_SIZE, F)
     # Equity proporcional al tamaño para mantener ratios sanos al inicio
     equity_firms_vec = (prod_ini_vec / p.PRODUCCION_INICIAL) * p.EQUITY_INICIAL_FIRMAS
     liq_firms_vec = (prod_ini_vec / p.PRODUCCION_INICIAL) * p.LIQUIDEZ_INICIAL_FIRMAS
 
     # Bancos: Tamaños diversos (Power Law es común en bancos)
-    equity_banks_vec = lognorm_vec(p.EQUITY_INICIAL_BANCOS, SIGMA_SIZE, B)
+    equity_banks_vec = lognorm_vec(p.EQUITY_INICIAL_BANCOS, p.SIGMA_SIZE, B)
     liq_banks_vec = (
         equity_banks_vec / p.EQUITY_INICIAL_BANCOS
     ) * p.LIQUIDEZ_INICIAL_BANCOS
@@ -96,7 +92,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     state = {
         # Empresas (Firms)
         "firms_prices": uniform_vec(
-            p.PRECIO_INICIAL, SPREAD_PRICE, F
+            p.PRECIO_INICIAL, p.SPREAD_PRICE, F
         ),  # Precios ~ Normales
         "firms_production": prod_ini_vec,
         "firms_demand": prod_ini_vec.copy(),  # Asumimos equilibrio inicial
@@ -121,8 +117,8 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         "net_BB": np.zeros((B, B)),
         "rates_FB": np.zeros((F, B)),
         "rates_BB": np.zeros((B, B)),
-        "tax_rates_BB": np.zeros((B, B)), # Tasa de impuesto Interbancario
-        "bailout_fund": 0.0,              # Fondo de Rescate (Acumulador SRT)
+        "tax_rates_BB": np.zeros((B, B)),  # Tasa de impuesto Interbancario
+        "bailout_fund": 0.0,  # Fondo de Rescate (Acumulador SRT)
         # Matrices de Flujo (para logger/stats)
         "labor_matrix": np.zeros((F, H)),
     }
@@ -243,7 +239,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         state["firms_wages_paid"] = res_p2[
             "wages_paid_vector"
         ]  # Guardar salarios reales para Paso 5
-        
+
         # Actualizar Tasas Interbancarias
         state["rates_BB"] = res_p2["rates_BB"]
         state["tax_rates_BB"] = res_p2["tax_rates_BB"]
@@ -313,7 +309,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         state["banks_liquidity"] = res_p5["banks_liquidity"]
         state["banks_equity"] = res_p5["banks_equity"]
         state["net_BB"] = res_p5["net_BB"]
-        
+
         # Actualizar Fondo de Rescate
         state["bailout_fund"] = res_p5["bailout_fund"]
 
