@@ -168,7 +168,14 @@ def paso2(state, params):
     idxs_deficit = np.where(deficit_B_mask)[0]
     idxs_surplus = np.where(surplus_B_mask)[0]
 
-    tax_matrix = np.zeros((B, B))
+    # Recuperar o inicializar matrices de tasas
+    rates_BB = state.get("rates_BB", np.zeros((B, B)))
+    tax_rates_BB = state.get("tax_rates_BB", np.zeros((B, B)))
+
+    # Resetear matrices de tasas solo donde haya nuevas transacciones? 
+    # Generalmente se asume persistencia, pero si hay nueva negociación, se sobreescribe.
+    # Como iteramos por déficit, solo actualizaremos los pares activos.
+    
     transactions_list = []
 
     if len(idxs_deficit) > 0 and len(idxs_surplus) > 0:
@@ -302,7 +309,11 @@ def paso2(state, params):
                 L_BB[i_global, j_glob] += amount
                 Liq_B[i_global] += amount
                 Liq_B[j_glob] -= amount
-                tax_matrix[i_global, j_glob] = off["tax"]
+                
+                # Actualizar Tasas del Enlace (Total y Tax)
+                # Asumimos que la nueva tasa aplica a todo el stock (Rollover implícito)
+                rates_BB[i_global, j_glob] = off["total_cost"]
+                tax_rates_BB[i_global, j_glob] = off["tax"]
 
                 if amount > 0:
                     transactions_list.append(
@@ -332,7 +343,8 @@ def paso2(state, params):
         "banks_liquidity": Liq_B,
         "firms_labor_demand": L_hired_F,
         "wages_paid_vector": wages_paid,
-        "tax_matrix": tax_matrix,
+        "rates_BB": rates_BB,        # DEVUELVE MATRIZ DE TASAS TOTALES
+        "tax_rates_BB": tax_rates_BB, # DEVUELVE MATRIZ DE TASAS IMPUESTO
         "transactions": transactions_list,
         "new_rates_FB": chosen_rates,
         "bank_indices": chosen_banks,

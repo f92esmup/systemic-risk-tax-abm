@@ -170,13 +170,43 @@ def paso5(state, params):
         )  # También restablecer objetivo
 
     # 2. Flujos Interbancarios (Simplificado: Pago de intereses neto)
-    r_IB = params.R_BAR
-    interest_IB_pay = np.sum(L_BB, axis=1) * r_IB
-    interest_IB_rec = np.sum(L_BB, axis=0) * r_IB
-
-    # Flujo neto
-    net_IB_cashflow = interest_IB_rec - interest_IB_pay
-    Liq_B += net_IB_cashflow
+    # Recuperamos las tasas negociadas (Matrix BxB)
+    # rates_BB incluye el impuesto. tax_rates_BB es la parte del impuesto.
+    
+    r_IB_total = state.get("rates_BB", np.full((B, B), params.R_BAR))
+    r_IB_tax = state.get("tax_rates_BB", np.zeros((B, B)))
+    
+    # Calcular Interés Total (Bruto) que paga el Deudor
+    # L_BB[i, j] es lo que i debe a j.
+    # Interés que i paga a j = L_BB[i, j] * r_IB_total[i, j]
+    interest_IB_pay_matrix = L_BB * r_IB_total
+    
+    # Calcular la parte que es Impuesto (SRT)
+    tax_pay_matrix = L_BB * r_IB_tax
+    
+    # El prestamista recibe: Total - Tax
+    interest_lender_matrix = interest_IB_pay_matrix - tax_pay_matrix
+    
+    # Flujos Agregados
+    total_paid_by_borrower = np.sum(interest_IB_pay_matrix, axis=1) # i paga esto
+    total_received_by_lender = np.sum(interest_lender_matrix, axis=0) # j recibe esto
+    total_tax_collected = np.sum(tax_pay_matrix) # Suma total de impuestos
+    
+    # Actualizar Liquidez
+    Liq_B -= total_paid_by_borrower
+    Liq_B += total_received_by_lender
+    
+    # Net cashflow para cálculo de profits (lo que realmente entró/salió de caja del banco)
+    # Profit = Recibido - Pagado
+    # Ojo: Aquí 'net_IB_cashflow' se usa para sumar a Equity.
+    # El banco PAGA 'total_paid_by_borrower' (todo sale de su equity/liquidez)
+    # El banco RECIBE 'total_received_by_lender' (solo su parte)
+    
+    net_IB_cashflow = total_received_by_lender - total_paid_by_borrower
+    
+    # Acumular en Fondo de Rescate
+    bailout_fund = state.get("bailout_fund", 0.0)
+    bailout_fund += total_tax_collected
 
     # 3. Equity Bancos
     income_interest_F = np.sum(interest_covered_matrix, axis=0)
@@ -265,5 +295,6 @@ def paso5(state, params):
         "bankruptcies_B": np.sum(bankrupt_B_mask),
         "dividends_total": dividends_total_val,
         "contagion_loss": total_losses_contagion,
-        "mask_bankrupt_F": bankrupt_F_mask,  # NUEVO
+        "mask_bankrupt_F": bankrupt_F_mask,
+        "bailout_fund": bailout_fund, # NUEVO: Retornar fondo actualizado
     }

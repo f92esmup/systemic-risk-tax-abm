@@ -18,11 +18,11 @@ class Param:
     # K = 2000. Si antes W=1.0, ahora W=2000.0
 
     # --- Parámetros Económicos ---
-    ALPHA = 0.25  # Productividad (Físico: 1 trabajador produce 0.25 coches/mes)
+    ALPHA = 0.1  # Productividad (Físico: 1 trabajador produce 0.25 coches/mes)
     W_BASE = 2200.0  # Salario Base Mensual en €
 
     # Precio Inicial: Margen sobre costes.
-    # Coste laboral unitario = W / ALPHA = 2200 / 0.25 = 8,800 €
+    # Coste laboral unitario = W / ALPHA = 2200 / 0.1 = 22,000 €
     # Precio con margen = 24,000 € (Margen MASIVO para robustez extrema)
     PRECIO_INICIAL = 24000.0
 
@@ -85,7 +85,7 @@ class Param:
     SUELO_DEMANDA_RELATIVO = 0.1
 
     # --- Impuestos ---
-    ZETA = 1.0  # Sensibilidad SRT (Internalización Completa - Artículo 1)
+    ZETA = 0.02  # Sensibilidad SRT (Internalización Completa - Artículo 1)
     TASA_TOBIN = 0.002  # 0.2% (Adimensional, no cambia)
 
     # --- Configuración ---
