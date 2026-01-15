@@ -28,7 +28,7 @@ plt.rcParams.update(PARAMS)
 OUTPUT_DIR = "output_plots"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-SIMULATIONS_PER_MODE = 6  # Cantidad de simulaciones para suavizado estadísticoSIMULATIONS_PER_MODE = 5  # Cantidad de simulaciones para suavizado estadístico
+SIMULATIONS_PER_MODE = 1000  # Cantidad de simulaciones para suavizado estadísticoSIMULATIONS_PER_MODE = 5  # Cantidad de simulaciones para suavizado estadístico
 
 # =============================================================================
 # MOTOR DE SIMULACIÓN
@@ -58,8 +58,8 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     logger = SimulationLogger()
 
     # GENERADORES DE HETEROGENEIDAD
-    rng = np.random.default_rng(semilla) # Usar el generador moderno de numpy
-    
+    rng = np.random.default_rng(semilla)  # Usar el generador moderno de numpy
+
     # Función auxiliar para generar distribución Log-Normal (con media target)
     def lognorm_vec(mean_val, sigma, size):
         # Calcular mu para que la media de la distribución sea mean_val
@@ -77,41 +77,47 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     F, B, H = p.F, p.B, p.H
 
     # Parámetros de dispersión (sigma para lognormal, pct para uniforme)
-    SIGMA_SIZE = 0.5   # Dispersión de tamaño (Equity, Producción)
-    SPREAD_PRICE = 0.05 # 5% de variación en precios iniciales
-    
+    SIGMA_SIZE = 0.5  # Dispersión de tamaño (Equity, Producción)
+    SPREAD_PRICE = 0.05  # 5% de variación en precios iniciales
+
     # Generar vectores base
     # Empresas: Tamaños diversos
     prod_ini_vec = lognorm_vec(p.PRODUCCION_INICIAL, SIGMA_SIZE, F)
     # Equity proporcional al tamaño para mantener ratios sanos al inicio
     equity_firms_vec = (prod_ini_vec / p.PRODUCCION_INICIAL) * p.EQUITY_INICIAL_FIRMAS
     liq_firms_vec = (prod_ini_vec / p.PRODUCCION_INICIAL) * p.LIQUIDEZ_INICIAL_FIRMAS
-    
+
     # Bancos: Tamaños diversos (Power Law es común en bancos)
     equity_banks_vec = lognorm_vec(p.EQUITY_INICIAL_BANCOS, SIGMA_SIZE, B)
-    liq_banks_vec = (equity_banks_vec / p.EQUITY_INICIAL_BANCOS) * p.LIQUIDEZ_INICIAL_BANCOS
-    
+    liq_banks_vec = (
+        equity_banks_vec / p.EQUITY_INICIAL_BANCOS
+    ) * p.LIQUIDEZ_INICIAL_BANCOS
+
     # Hogares: Riqueza diversa
     deposits_H_vec = lognorm_vec(p.DEPOSITOS_INICIALES_HOGARES, 0.8, H)
 
     state = {
         # Empresas (Firms)
-        "firms_prices": uniform_vec(p.PRECIO_INICIAL, SPREAD_PRICE, F), # Precios ~ Normales
+        "firms_prices": uniform_vec(
+            p.PRECIO_INICIAL, SPREAD_PRICE, F
+        ),  # Precios ~ Normales
         "firms_production": prod_ini_vec,
-        "firms_demand": prod_ini_vec.copy(), # Asumimos equilibrio inicial
+        "firms_demand": prod_ini_vec.copy(),  # Asumimos equilibrio inicial
         "firms_inventory": np.zeros(F),
         "firms_equity": equity_firms_vec,
         "firms_liquidity": liq_firms_vec,
         "firms_wage": uniform_vec(p.W_BASE, 0.02, F),  # Salarios casi iguales al inicio
         "firms_target_production": prod_ini_vec.copy(),
-        "firms_labor_demand": np.ceil(prod_ini_vec / p.ALPHA).astype(int), # Calculado según prod específica
+        "firms_labor_demand": np.ceil(prod_ini_vec / p.ALPHA).astype(
+            int
+        ),  # Calculado según prod específica
         "mask_renacidas": np.zeros(F, dtype=bool),
         # Bancos (Banks)
         "banks_equity": equity_banks_vec,
         "banks_liquidity": liq_banks_vec,
         # Hogares (Households)
         "households_deposits": deposits_H_vec,
-        "households_bank": rng.integers(0, B, size=H), # Asignación aleatoria inicial
+        "households_bank": rng.integers(0, B, size=H),  # Asignación aleatoria inicial
         "households_dividends": np.zeros(H),
         # Redes (Networks)
         "net_FB": np.zeros((F, B)),
@@ -126,45 +132,47 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     # Préstamos iniciales proporcionales al tamaño de la empresa
     initial_loans_FB = np.zeros((F, B))
     init_banks_F = rng.integers(0, B, F)
-    
+
     # El préstamo inicial depende del equity de la empresa (ej. 10% del equity)
-    amount_vec_FB = equity_firms_vec * 0.1 
-    
+    amount_vec_FB = equity_firms_vec * 0.1
+
     initial_loans_FB[np.arange(F), init_banks_F] = amount_vec_FB
     state["net_FB"] = initial_loans_FB
 
     # [NEW] Initialize Interbank Network (BB) - Scale-Free (Barabási-Albert like)
     # Paper 1 uses empirical or scale-free networks. Random is too homogeneous.
     initial_loans_BB = np.zeros((B, B))
-    
+
     # 1. Create a core of connected banks (first m banks fully connected)
-    m = 2 # Links per new node
+    m = 2  # Links per new node
     if B > m:
         for i in range(m):
             for j in range(m):
                 if i != j:
-                    loan_size = equity_banks_vec[i] * 0.1 # Small initial loans
+                    loan_size = equity_banks_vec[i] * 0.1  # Small initial loans
                     initial_loans_BB[i, j] = loan_size
-    
+
         # 2. Add remaining banks with preferential attachment (incoming links ~ degree)
         # We use in-degree (who has many lenders) as proxy for "prominence" or simply random + degree
         # For simplicity in directed graph: attach to nodes with high total degree (in + out)
-        
+
         for i in range(m, B):
             # Calculate probabilities based on current degree (sum of binary connections)
             adjacency = (initial_loans_BB > 0).astype(int)
-            degrees = np.sum(adjacency, axis=0) + np.sum(adjacency, axis=1) # Total degree
+            degrees = np.sum(adjacency, axis=0) + np.sum(
+                adjacency, axis=1
+            )  # Total degree
             total_degree = np.sum(degrees)
-            
+
             if total_degree == 0:
                 probs = np.ones(B) / B
             else:
                 probs = degrees / total_degree
-            
+
             # Select m targets to lend TO (i becomes creditor? or debtor?)
             # Usually new entrants borrow from hubs. Let's say i borrows from existing hubs.
             # So i is Debtor (Row), Hubs are Creditors (Col).
-            
+
             # Sample m unique targets from existing nodes 0..B-1 (but probs only non-zero for 0..i-1 typically?)
             # Barabasi usually grows. Here we just pick from all, weighted by current degree.
             # Mask self
@@ -173,28 +181,30 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             if norm > 0:
                 probs /= norm
             else:
-                probs = np.ones(B) / B; probs[i]=0; probs /= np.sum(probs)
-                
+                probs = np.ones(B) / B
+                probs[i] = 0
+                probs /= np.sum(probs)
+
             targets = rng.choice(np.arange(B), size=m, replace=False, p=probs)
-            
+
             for t in targets:
                 # i borrows from t
-                loan_size = equity_banks_vec[i] * 0.2 
+                loan_size = equity_banks_vec[i] * 0.2
                 initial_loans_BB[i, t] = loan_size
-                
+
     state["net_BB"] = initial_loans_BB
 
     # Adjust liquidity (Loan proceeds/disbursements)
     # Firms gain liquidity from FB loans
     state["firms_liquidity"] += np.sum(initial_loans_FB, axis=1)
-    
-    # Banks: 
+
+    # Banks:
     # - Lose liquidity from FB loans (Lending to firms)
     # - Gain liquidity from BB borrowing (Borrower side)
     # - Lose liquidity from BB lending (Lender side)
-    state["banks_liquidity"] -= np.sum(initial_loans_FB, axis=0) # Lending to firms
-    state["banks_liquidity"] += np.sum(initial_loans_BB, axis=1) # Borrowing from banks
-    state["banks_liquidity"] -= np.sum(initial_loans_BB, axis=0) # Lending to banks
+    state["banks_liquidity"] -= np.sum(initial_loans_FB, axis=0)  # Lending to firms
+    state["banks_liquidity"] += np.sum(initial_loans_BB, axis=1)  # Borrowing from banks
+    state["banks_liquidity"] -= np.sum(initial_loans_BB, axis=0)  # Lending to banks
 
     # Historia (Aggregates for Plots)
     historia = {
@@ -317,7 +327,9 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
 
         # Stop condition: All banks insolvent
         if np.sum(state["banks_equity"] > 0) == 0:
-            print(f"Colapso total del sistema bancario en t={t}. Deteniendo simulación.")
+            print(
+                f"Colapso total del sistema bancario en t={t}. Deteniendo simulación."
+            )
             break
 
         # Registro Aggregado
