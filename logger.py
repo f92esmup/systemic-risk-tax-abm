@@ -64,7 +64,7 @@ class SimulationLogger:
 
         os.makedirs(run_dir, exist_ok=True)
 
-        print(f"   [Logger] Flushing data for run {run_id}...")
+        # print(f"   [Logger] Flushing data for run {run_id}...")
 
         # 1. Agentes y Globales
         # Unir buffer de agentes
@@ -99,7 +99,7 @@ class SimulationLogger:
 
         # Limpiar buffers tras flush
         self.clear()
-        print("   [Logger] Done.")
+        # print("   [Logger] Done.")
 
     def clear(self):
         self.agents_buffer = {}

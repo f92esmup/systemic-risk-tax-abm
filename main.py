@@ -2,6 +2,9 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 import pandas as pd
+import concurrent.futures
+import multiprocessing
+from tqdm import tqdm
 from logger import SimulationLogger
 from parametros import Param as p
 
@@ -330,9 +333,9 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
 
         # Condición de parada: Todos los bancos insolventes
         if np.sum(state["banks_equity"] > 0) == 0:
-            print(
-                f"Colapso total del sistema bancario en t={t}. Deteniendo simulación."
-            )
+            # print(
+            #    f"Colapso total del sistema bancario en t={t}. Deteniendo simulación."
+            # )
             break
 
         # Registro Aggregado
@@ -444,23 +447,52 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
 # =============================================================================
 # EXPERIMENTO
 # =============================================================================
+def worker_simulation(args):
+    """
+    Wrapper para ejecutar una sola simulación en un proceso separado.
+    args: (mode, seed, run_id)
+    """
+    mode, seed, run_id = args
+    try:
+        ejecutar_simulacion(modo_impuesto=mode, semilla=seed, run_id=run_id)
+        return True
+    except Exception as e:
+        print(f"Error en simulación {run_id}: {e}")
+        return False
+
+
 def run_experiment():
     modes = ["NINGUNO", "TOBIN", "SRT"]
+    
+    tasks = []
+    print(f"--- Configurando Experimento Comparativo ({SIMULATIONS_PER_MODE} runs/modo) ---")
 
-    print(
-        f"--- Iniciando Experimento Comparativo ({SIMULATIONS_PER_MODE} runs/modo) ---"
-    )
-
+    # Preparar lista de tareas
     for mode in modes:
-        print(f"Modo: {mode} ", end="")
         for i in range(SIMULATIONS_PER_MODE):
             run_id = f"{mode}_sim_{i}"
-            # Ejecutar y guardar en disco
-            ejecutar_simulacion(modo_impuesto=mode, semilla=42 + i, run_id=run_id)
+            # Semilla única
+            semilla = 42 + i
+            tasks.append((mode, semilla, run_id))
 
-            if i % 5 == 0:
-                print(".", end="", flush=True)
-        print(" OK")
+    total_tasks = len(tasks)
+    # Usar CPU count - 1 para dejar algo al sistema, o al menos 1
+    max_workers = max(1, multiprocessing.cpu_count() - 1)
+    
+    print(f"--- Iniciando Ejecución Paralela con {max_workers} procesos ---")
+    print(f"--- Total de simulaciones a procesar: {total_tasks} ---")
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Enviar tareas
+        # Usamos submit para tener control granular del progreso
+        futures = [executor.submit(worker_simulation, t) for t in tasks]
+        
+        # Barra de progreso con tqdm
+        for future in tqdm(concurrent.futures.as_completed(futures), total=total_tasks, unit="sim", desc="Simulando"):
+            # Recoger resultado (necesario para propagar excepciones si las hubiera, aunque worker_simulation las captura)
+            future.result()
+
+    print(" OK")
 
 
 if __name__ == "__main__":
