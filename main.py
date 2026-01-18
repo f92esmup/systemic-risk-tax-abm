@@ -32,7 +32,7 @@ plt.rcParams.update(PARAMS)
 OUTPUT_DIR = "output_plots"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-SIMULATIONS_PER_MODE = 1000  # Cantidad de simulaciones para suavizado estadístico
+SIMULATIONS_PER_MODE = 30  # Cantidad de simulaciones para suavizado estadístico
 
 # =============================================================================
 # MOTOR DE SIMULACIÓN
@@ -148,7 +148,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
             for j in range(m):
                 if i != j:
                     loan_size = (
-                        equity_banks_vec[i] * 0.1
+                        equity_banks_vec[i] * p.RATIO_DEUDA_EQUITY_BANCOS
                     )  # Préstamos iniciales pequeños
                     initial_loans_BB[i, j] = loan_size
 
@@ -189,7 +189,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
 
             for t in targets:
                 # i pide prestado a t
-                loan_size = equity_banks_vec[i] * 0.2
+                loan_size = equity_banks_vec[i] * (p.RATIO_DEUDA_EQUITY_BANCOS + 0.1)
                 initial_loans_BB[i, t] = loan_size
 
     state["net_BB"] = initial_loans_BB
@@ -331,12 +331,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         # Reset de Tasas FB para empresas que murieron (y renacieron)
         state["rates_FB"][state["mask_renacidas"], :] = 0.0
 
-        # Condición de parada: Todos los bancos insolventes
-        if np.sum(state["banks_equity"] > 0) == 0:
-            # print(
-            #    f"Colapso total del sistema bancario en t={t}. Deteniendo simulación."
-            # )
-            break
+        # (Condición de parada movida al final del bucle para asegurar registro)
 
         # Registro Aggregado
         total_quiebras_B = res_p5["bankruptcies_B"]
@@ -439,6 +434,20 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
 
         # Registrar datos en el logger
         logger.log_step(t, agents, networks)
+
+        # =============================================================================
+        # CONDICIONES DE PARADA (Post-Registro)
+        # =============================================================================
+        
+        # 1. Colapso Total (Todos los bancos quebrados)
+        if np.sum(state["banks_equity"] > 0) == 0:
+            break
+
+        # 2. Parada a la primera quiebra (Configurable)
+        # Si hubo quiebras en este paso (total_quiebras_B > 0), paramos.
+        # Nota: total_quiebras_B es el conteo del paso actual en paso5
+        if p.STOP_ON_FIRST_FAILURE and total_quiebras_B > 0:
+            break
 
     logger.flush(run_id)
     return historia

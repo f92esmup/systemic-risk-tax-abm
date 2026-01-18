@@ -68,6 +68,8 @@ class Param:
     SIGMA_SIZE = 0.8  # Dispersión Log-Normal para tamaños (Equity, Producción)
     SPREAD_PRICE = 0.05  # Dispersión Uniforme para precios iniciales (±5%)
 
+    RATIO_DEUDA_EQUITY_BANCOS = 0.05
+
     # --- Parámetros de Red y Búsqueda ---
     N_BANCOS_CONTACTADOS = 5
     Z_CONSUMO = 2
@@ -98,3 +100,6 @@ class Param:
 
     # --- Configuración ---
     MODO_IMPUESTO = "NINGUNO"
+
+    # --- Condición de Parada ---
+    STOP_ON_FIRST_FAILURE = True  # Detener simulación al primer evento de quiebra
