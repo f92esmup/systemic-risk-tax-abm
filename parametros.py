@@ -28,10 +28,10 @@ class Param:
 
     # --- Ajuste de Estabilidad con DIVIDENDOS ALTOS ---
     R_BAR = (
-        0.015  # 1.5% mensual. Equilibrio entre ingresos bancarios y carga a empresas.
+        0.02  # 1.5% mensual. Equilibrio entre ingresos bancarios y carga a empresas.
     )
     DIVIDEND_RATIO = 0.20  # <--- REQUERIMIENTO: 20% (Volvemos al valor del Paper)
-    PROPENSION_CONSUMO = 0.9  # Alto consumo para mantener flujo de caja en empresas
+    PROPENSION_CONSUMO = 0.8  # Alto consumo para mantener flujo de caja en empresas
 
     # --- Parámetros de Crédito y Deuda ---
     TAU = 0.01  # Amortización de deuda (1% mensual) - Ajuste: Lenta para reducir salida de caja
@@ -47,11 +47,11 @@ class Param:
     # Para sobrevivir al drenaje de dividendos (20%), necesitamos stocks masivos.
 
     # Equity Firmas: Colchón para no quebrar día 1.
-    EQUITY_INICIAL_FIRMAS = 500000.0  # Antes 200k
+    EQUITY_INICIAL_FIRMAS = 200000.0  # Antes 200k
 
     # Liquidez Firmas: Nómina de 1 mes aprox (13 emp * 2200€ = 28.600€)
     # Les damos menos para obligarlas a pedir crédito.
-    LIQUIDEZ_INICIAL_FIRMAS = 200000.0  # Antes 100k
+    LIQUIDEZ_INICIAL_FIRMAS = 100000.0  # Antes 100k
 
     # Equity Bancos: Capital Base. Lo hacemos bajo para fragilidad.
     # Equity Bancario x10 respecto a pruebas anteriores para soportar payout de 20%
@@ -66,7 +66,7 @@ class Param:
 
     # --- Parámetros de Heterogeneidad ---
     SIGMA_SIZE = 0.8  # Dispersión Log-Normal para tamaños (Equity, Producción)
-    SPREAD_PRICE = 0.05  # Dispersión Uniforme para precios iniciales (±5%)
+    SPREAD_PRICE = 0.2  # Dispersión Uniforme para precios iniciales (±5%)
 
     RATIO_DEUDA_EQUITY_BANCOS = 0.05
 
