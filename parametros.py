@@ -65,10 +65,12 @@ class Param:
     DEPOSITOS_INICIALES_HOGARES = 500000.0
 
     # --- Parámetros de Heterogeneidad ---
-    SIGMA_SIZE = 0.8  # Dispersión Log-Normal para tamaños (Equity, Producción)
+    SIGMA_SIZE = 1.0  # Dispersión Log-Normal para tamaños (Equity, Producción)
     SPREAD_PRICE = 0.2  # Dispersión Uniforme para precios iniciales (±5%)
 
-    RATIO_DEUDA_EQUITY_BANCOS = 0.05
+    # AUMENTO MASIVO DE CONECTIVIDAD: 30% del Equity prestado a cada par.
+    # Necesario para que halla contagio con Equity Bancario alto (2M).
+    RATIO_DEUDA_EQUITY_BANCOS = 0.30
 
     # --- Parámetros de Red y Búsqueda ---
     N_BANCOS_CONTACTADOS = 5
@@ -95,7 +97,7 @@ class Param:
     SUELO_DEMANDA_RELATIVO = 0.1
 
     # --- Impuestos ---
-    ZETA = 0.02  # Sensibilidad SRT (Internalización Completa - Artículo 1)
+    ZETA = 0.04  # Sensibilidad SRT (Internalización Completa - Artículo 1)
     TASA_TOBIN = 0.002  # 0.2% (Adimensional, no cambia)
 
     # --- Configuración ---

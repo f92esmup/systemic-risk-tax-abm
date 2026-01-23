@@ -6,3 +6,4 @@ output_data/
 *.gift
 test_*.py
 output*/
+venv/
