@@ -7,3 +7,4 @@ output_data/
 test_*.py
 output*/
 venv/
+*.pt

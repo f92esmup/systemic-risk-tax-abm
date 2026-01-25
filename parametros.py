@@ -6,10 +6,10 @@ class Param:
     """
 
     # --- Dimensiones del Sistema ---
-    B = 20  # Bancos
-    F = 100  # Empresas
-    H = 1300  # Hogares
-    T = 250  # Tiempo
+    B = 60  # Bancos
+    F = 300  # Empresas
+    H = 3900  # Hogares
+    T = 500  # Tiempo
 
     # --- FACTOR DE ESCALA (Solo para referencia mental) ---
     # K = 2000. Si antes W=1.0, ahora W=2000.0
@@ -70,7 +70,7 @@ class Param:
 
     # AUMENTO MASIVO DE CONECTIVIDAD: 30% del Equity prestado a cada par.
     # Necesario para que halla contagio con Equity Bancario alto (2M).
-    RATIO_DEUDA_EQUITY_BANCOS = 0.30
+    RATIO_DEUDA_EQUITY_BANCOS = 0.60
 
     # --- Parámetros de Red y Búsqueda ---
     N_BANCOS_CONTACTADOS = 5
@@ -97,7 +97,7 @@ class Param:
     SUELO_DEMANDA_RELATIVO = 0.1
 
     # --- Impuestos ---
-    ZETA = 0.04  # Sensibilidad SRT (Internalización Completa - Artículo 1)
+    ZETA = 0.20  # Sensibilidad SRT (Internalización Completa - Artículo 1)
     TASA_TOBIN = 0.002  # 0.2% (Adimensional, no cambia)
 
     # --- Configuración ---

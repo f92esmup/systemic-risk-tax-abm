@@ -32,7 +32,7 @@ plt.rcParams.update(PARAMS)
 OUTPUT_DIR = "output_plots"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-SIMULATIONS_PER_MODE = 1000  # Cantidad de simulaciones para suavizado estadístico
+
 
 # =============================================================================
 # MOTOR DE SIMULACIÓN
@@ -470,15 +470,15 @@ def worker_simulation(args):
         return False
 
 
-def run_experiment():
+def run_experiment(simulations_per_mode=1000):
     modes = ["NINGUNO", "TOBIN", "SRT"]
     
     tasks = []
-    print(f"--- Configurando Experimento Comparativo ({SIMULATIONS_PER_MODE} runs/modo) ---")
+    print(f"--- Configurando Experimento Comparativo ({simulations_per_mode} runs/modo) ---")
 
     # Preparar lista de tareas
     for mode in modes:
-        for i in range(SIMULATIONS_PER_MODE):
+        for i in range(simulations_per_mode):
             run_id = f"{mode}_sim_{i}"
             # Semilla única
             semilla = 42 + i
