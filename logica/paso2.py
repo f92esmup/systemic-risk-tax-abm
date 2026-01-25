@@ -180,7 +180,7 @@ def paso2(state, params):
 
     if len(idxs_deficit) > 0 and len(idxs_surplus) > 0:
         # Factor para probabilidad de default (Ec. 5 Artículo 1)
-        factor_pd = getattr(params, "FACTOR_PROB_DEFAULT", 0.01)
+        factor_pd = params.FACTOR_PROB_DEFAULT
         safe_equity = np.maximum(Equity_B, 1e-9)
 
         # Fragilidad del Borrower (i) para tasas
@@ -193,7 +193,7 @@ def paso2(state, params):
         # Psi (especificidad) del Lender
         psi_B = np.random.uniform(0, params.RANGO_PSI, B)
 
-        modo = getattr(params, "MODO_IMPUESTO", "NINGUNO")
+        modo = params.MODO_IMPUESTO
 
         # Iterar sobre Bancos con Déficit
         for i_global in idxs_deficit:
