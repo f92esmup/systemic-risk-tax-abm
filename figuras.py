@@ -55,6 +55,14 @@ def load_simulation_data(data_dir=DATA_DIR):
         for m in MODES_ORDER
     }
 
+    # Add topology keys
+    for m in MODES_ORDER:
+        results[m].update({
+            "in_degree_dist": [],
+            "out_degree_dist": [],
+            "clustering_dist": []
+        })
+
     if not os.path.exists(data_dir):
         print(f"Error: Directory {data_dir} not found.")
 
@@ -169,6 +177,81 @@ def load_simulation_data(data_dir=DATA_DIR):
                         results[mode]["scatter_data_x"].extend(rel_loans)
 
                         results[mode]["scatter_data_y"].extend(rel_deltas)
+
+        # --- 4. Topología de Red (Figura 7) ---
+        net_path = os.path.join(full_run_path, "net_BB.parquet")
+        if os.path.exists(net_path):
+            try:
+                net_df = pd.read_parquet(net_path)
+                if not net_df.empty:
+                    # Usar el último paso disponible o un target específico
+                    max_t = net_df["t"].max()
+                    # Si la simulación llegó al final, usar ese. Si no, el último disponible.
+                    # El usuario menciona "paso de tiempo T (200)".
+                    # Intentamos buscar t cerca de 200 si existe, o el max.
+                    target_t = max_t
+                    
+                    df_t = net_df[net_df["t"] == target_t]
+                    
+                    if not df_t.empty:
+                        # Reconstruir Matriz Adyacencia
+                        # Asumimos B bancos definidos en parametros, o inferimos
+                        B_dim = p.B
+                        adj = np.zeros((B_dim, B_dim))
+                        
+                        # net_BB guarda: source (Fila), target (Columna), weight
+                        # En main.py: initial_loans_BB[i, j] -> i pide prestado a j
+                        # Significa: i (fila) DEBE a j (columna).
+                        # L_ij = Deuda de i con j.
+                        
+                        # Asegurar índices enteros
+                        srcs = df_t["source"].astype(int).values
+                        tgts = df_t["target"].astype(int).values
+                        ws = df_t["weight"].values
+                        
+                        # Filtrar índices fuera de rango (seguridad)
+                        mask = (srcs < B_dim) & (tgts < B_dim)
+                        adj[srcs[mask], tgts[mask]] = ws[mask]
+                        
+                        # CALCULAR MÉTRICAS
+                        # 1. Weighted In-Degree: Suma de préstamos recibidos (Pasivos).
+                        # Si L_ij es "i debe a j", los pasivos de i son la suma de la fila i over j.
+                        w_in_degree = np.sum(adj, axis=1) # Suma por filas
+                        
+                        # 2. Weighted Out-Degree: Suma de préstamos otorgados (Activos).
+                        # Si L_ij es "i debe a j", los activos de j son los préstamos que j hizo a otros i.
+                        # = Suma de la columna j over i.
+                        # Queremos el vector para cada banco. vector[k] = suma col k.
+                        w_out_degree = np.sum(adj, axis=0) # Suma por columnas
+                        
+                        # 3. Weighted Clustering (Barrat 2004)
+                        # C_i = 1/(s_i(k_i-1)) * sum_{j,h} (w_ij+w_ih)/2 * a_ij * a_ih * a_jh
+                        # Versión Simétrica
+                        W_sym = adj + adj.T
+                        A_sym = (W_sym > 0).astype(float)
+                        
+                        s_i = np.sum(W_sym, axis=1)
+                        k_i = np.sum(A_sym, axis=1)
+                        
+                        # Numerador: diag(W @ A @ A)
+                        # Nota: A es simétrica, A^2 funciona igual.
+                        # Explicación: (W A)_{ih} = sum_j W_{ij} A_{jh}
+                        # (W A A)_{ii} = sum_h (W A)_{ih} A_{hi} = sum_{j,h} W_{ij} A_{jh} A_{hi}
+                        # Coincide con sum_{j,h} w_{ij} a_{jk} a_{ki} (indices mudos) -> Triángulos ponderados.
+                        
+                        numerator = np.diag(W_sym @ (A_sym @ A_sym))
+                        
+                        clustering = np.zeros(B_dim)
+                        valid_mask = k_i > 1
+                        clustering[valid_mask] = numerator[valid_mask] / (s_i[valid_mask] * (k_i[valid_mask] - 1))
+                        
+                        # Guardar resultadoss
+                        results[mode]["in_degree_dist"].extend(w_in_degree)
+                        results[mode]["out_degree_dist"].extend(w_out_degree)
+                        results[mode]["clustering_dist"].extend(clustering)
+            except Exception as e:
+                print(f"Error procesando red para {run_dir}: {e}")
+
 
     return results
 
@@ -392,6 +475,93 @@ def plot_fig_4(results):
     plt.close()
 
 
+
+def plot_fig_7_topology(results):
+    """
+    Genera la Figura 7: Distribuciones de Métricas de Topología (W-In-Degree, W-Out-Degree, W-Clustering)
+    Ahora separadas en 3 archivos .png con el mismo estilo que Fig 4 (Histogramas de Barras).
+    """
+    def get_clean_list(metric_key):
+        data_list = []
+        labels = []
+        colors = []
+        for mode in MODES_ORDER:
+            d = results[mode].get(metric_key, [])
+            # Filtrar vacíos
+            if d and len(d) > 0:
+                data_list.append(np.array(d))
+                labels.append(MODE_LABELS[mode])
+                colors.append(MODE_COLORS[mode])
+        return data_list, labels, colors
+
+    # --- 7a: Weighted In-Degree ---
+    plt.figure()
+    data_list, labels, colors = get_clean_list("in_degree_dist")
+    if data_list:
+        # Usamos escala logarítmica en Y para apreciar la "Cola Pesada" mencionada
+        plt.hist(
+            data_list, 
+            bins=30, 
+            color=colors, 
+            label=labels, 
+            density=True, 
+            histtype="bar", 
+            alpha=0.8,
+            log=True
+        )
+    plt.title("Fig 7a: Weighted In-Degree Distribution")
+    plt.xlabel("Weighted In-Degree ($d^{in}_w$)")
+    plt.ylabel("Frequency (Log Scale)")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(f"{OUTPUT_DIR}/Fig_7a_InDegree.png")
+    plt.close()
+
+    # --- 7b: Weighted Out-Degree ---
+    plt.figure()
+    data_list, labels, colors = get_clean_list("out_degree_dist")
+    if data_list:
+        plt.hist(
+            data_list, 
+            bins=30, 
+            color=colors, 
+            label=labels, 
+            density=True, 
+            histtype="bar", 
+            alpha=0.8
+        )
+    plt.title("Fig 7b: Weighted Out-Degree Distribution")
+    plt.xlabel("Weighted Out-Degree ($d^{out}_w$)")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(f"{OUTPUT_DIR}/Fig_7b_OutDegree.png")
+    plt.close()
+
+    # --- 7c: Weighted Clustering ---
+    plt.figure()
+    data_list, labels, colors = get_clean_list("clustering_dist")
+    if data_list:
+        plt.hist(
+            data_list, 
+            bins=20, 
+            color=colors, 
+            label=labels, 
+            density=True, 
+            histtype="bar", 
+            alpha=0.8
+        )
+    plt.title("Fig 7c: Weighted Clustering Coefficient")
+    plt.xlabel("Weighted Clustering ($C^w$)")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(f"{OUTPUT_DIR}/Fig_7c_Clustering.png")
+    plt.close()
+
+
+
+
 def generar_graficas():
     print("--- Generando Gráficos Finales ---")
 
@@ -406,6 +576,9 @@ def generar_graficas():
 
     print("Generando Fig 4 (Distributions)...")
     plot_fig_4(data)
+
+    print("Generando Fig 7 (Topology)...")
+    plot_fig_7_topology(data)
 
     print(f"Listo. Resultados guardados en ./{OUTPUT_DIR}")
 
