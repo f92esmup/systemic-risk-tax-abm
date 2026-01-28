@@ -2,7 +2,6 @@ class Param:
     """
     Parámetros del Modelo CRISIS / SRT - ESCALA REAL (EUROS)
     Calibración: 1 Unidad de Tiempo = 1 Mes aprox.
-    Moneda: Euros (€)
     """
 
     # --- Dimensiones del Sistema ---
@@ -30,7 +29,7 @@ class Param:
     R_BAR = (
         0.02  # 1.5% mensual. Equilibrio entre ingresos bancarios y carga a empresas.
     )
-    DIVIDEND_RATIO = 0.20  # <--- REQUERIMIENTO: 20% (Volvemos al valor del Paper)
+    DIVIDEND_RATIO = 0.20  # <--- REQUERIMIENTO: 20% (Volvemos al valor del artículo)
     PROPENSION_CONSUMO = 0.8  # Alto consumo para mantener flujo de caja en empresas
 
     # --- Parámetros de Crédito y Deuda ---
@@ -43,18 +42,18 @@ class Param:
     # L_demand ~ 13 trabajadores -> Producción ~ 1.3 unidades
     PRODUCCION_INICIAL = 1.3
 
-    # Stocks Financieros (ESCENARIO "RICH SYSTEM")
+    # Stocks Financieros (ESCENARIO DE ABUNDANCIA)
     # Para sobrevivir al drenaje de dividendos (20%), necesitamos stocks masivos.
 
-    # Equity Firmas: Colchón para no quebrar día 1.
+    # Capital Firmas: Colchón para no quebrar día 1.
     EQUITY_INICIAL_FIRMAS = 200000.0  # Antes 200k
 
     # Liquidez Firmas: Nómina de 1 mes aprox (13 emp * 2200€ = 28.600€)
     # Les damos menos para obligarlas a pedir crédito.
     LIQUIDEZ_INICIAL_FIRMAS = 100000.0  # Antes 100k
 
-    # Equity Bancos: Capital Base. Lo hacemos bajo para fragilidad.
-    # Equity Bancario x10 respecto a pruebas anteriores para soportar payout de 20%
+    # Capital Bancos: Capital Base. Lo hacemos bajo para fragilidad.
+    # Capital Bancario x10 respecto a pruebas anteriores para soportar payout de 20%
     EQUITY_INICIAL_BANCOS = 2000000.0  # 2 Millones
 
     # Liquidez Bancos: Dinero prestable. Escaso para forzar interbancario.
@@ -65,11 +64,11 @@ class Param:
     DEPOSITOS_INICIALES_HOGARES = 500000.0
 
     # --- Parámetros de Heterogeneidad ---
-    SIGMA_SIZE = 1.0  # Dispersión Log-Normal para tamaños (Equity, Producción)
+    SIGMA_SIZE = 1.0  # Dispersión Log-Normal para tamaños (Capital, Producción)
     SPREAD_PRICE = 0.2  # Dispersión Uniforme para precios iniciales (±5%)
 
-    # AUMENTO MASIVO DE CONECTIVIDAD: 30% del Equity prestado a cada par.
-    # Necesario para que halla contagio con Equity Bancario alto (2M).
+    # AUMENTO MASIVO DE CONECTIVIDAD: 30% del Capital prestado a cada par.
+    # Necesario para que haya contagio con Capital Bancario alto (2M).
     RATIO_DEUDA_EQUITY_BANCOS = 0.60
 
     # --- Parámetros de Red y Búsqueda ---

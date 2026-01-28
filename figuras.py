@@ -55,7 +55,7 @@ def load_simulation_data(data_dir=DATA_DIR):
         for m in MODES_ORDER
     }
 
-    # Add topology keys
+    # Agregar claves de topología
     for m in MODES_ORDER:
         results[m].update({
             "in_degree_dist": [],

@@ -51,7 +51,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     if semilla is not None:
         np.random.seed(semilla)
 
-    # Limpiar/Crear directorio run si es t=0 (hecho por caller o aqui)
+    # Limpiar/Crear directorio run si es t=0 (hecho por quien llama o aquí)
     # create_run_dir(run_id)
 
     # start_time = time.time()
@@ -60,7 +60,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     # GENERADORES DE HETEROGENEIDAD
     rng = np.random.default_rng(semilla)  # Usar el generador moderno de numpy
 
-    # Función auxiliar para generar distribución Log-Normal (con media target)
+    # Función auxiliar para generar distribución Log-Normal (con media objetivo)
     def lognorm_vec(mean_val, sigma, size):
         # Calcular mu para que la media de la distribución sea mean_val
         # E[X] = exp(mu + sigma^2/2) => mu = ln(mean) - sigma^2/2
@@ -138,7 +138,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     state["net_FB"] = initial_loans_FB
 
     # Inicializar red interbancaria (BB) - Libre de escala (tipo Barabási-Albert)
-    # El Paper 1 usa redes empíricas o libres de escala. Aleatorio es demasiado homogéneo.
+    # El Artículo 1 usa redes empíricas o libres de escala. Aleatorio es demasiado homogéneo.
     initial_loans_BB = np.zeros((B, B))
 
     # 1. Crear un núcleo de bancos conectados (los primeros m bancos totalmente conectados)
@@ -206,7 +206,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
     state["banks_liquidity"] += np.sum(initial_loans_BB, axis=1)  # Lado prestatario
     state["banks_liquidity"] -= np.sum(initial_loans_BB, axis=0)  # Lado prestamista
 
-    # Historia (Aggregates for Plots)
+    # Historia (Agregados para gráficos)
     historia = {
         "t": [],
         "DebtRank_Promedio": [],
@@ -260,7 +260,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
                 "Pasivos_IB": state["net_BB"].copy(),
             }
 
-        # Calcular DebtRank (Reporting)
+        # Calcular DebtRank (Reporte)
         # v debe basarse en Pasivos (Liabilities), que son la suma por filas (axis=1)
         total_liabilities = np.sum(state["net_BB"], axis=1)
         V_total = np.sum(total_liabilities)
@@ -352,7 +352,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
                 "Equity_Bancos": state["banks_equity"].copy(),
             }
 
-        # --- PARQUET LOGGING ---
+        # --- REGISTRO PARQUET ---
         # Preparación de Datos
         agents = {
             "firms": pd.DataFrame(
@@ -400,7 +400,7 @@ def ejecutar_simulacion(modo_impuesto="NINGUNO", semilla=None, run_id="test"):
         # o categoría separada. Iteremos agentes como "Datos Tabulares"
         agents["globals"] = metrics_df
 
-        # Construir matrices "completas" para graph
+        # Construir matrices "completas" para gráficos
         # Matriz de Depósitos HB: Dispersa
         deposits_hb_matrix = np.zeros((H, B))
         deposits_hb_matrix[np.arange(H), state["households_bank"]] = state[
